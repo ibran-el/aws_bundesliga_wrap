@@ -15,6 +15,8 @@ S3_KEYS = {
     "matches_prefix": S3_PREFIX + "feeds-exports-24-25/matches/",
 }
 
+S3_SEASON_ID = "0001K8"
+
 # ── BEDROCK ─────────────────────────────────────────────────────────
 BEDROCK_REGION = "eu-central-1"
 BEDROCK_MODEL_PRIMARY   = "anthropic.claude-3-haiku-20240307-v1:0"

@@ -223,17 +223,30 @@ user_id (engagement JSON) → favorite_club → links to ClubId
 
 ## Daily Build Log
 
-### Day 1 — [DATE TBD]
+### Day 1 — 2026-05-13
 **Target:** AWS setup + Bedrock access confirmed + S3 data structure mapped
-**Actual:** TBD
-**Blockers:** TBD
-**Commits:** TBD
+**Actual:** All three gates passed. Venv + boto3 installed. S3 bucket
+confirmed (hackathon-data-514421696937, eu-central-1). Claude 3 Haiku
+responding on first attempt — no fallback model needed. config.py written
+with all constants, em-dash key, model ID, weights, club IDs. Git repo
+initialized locally with .gitignore blocking data/, credentials, venv.
+**Blockers:** None
+**Commits:** Day 1: config.py locked, S3+Bedrock gates passed, Haiku confirmed
 
-### Day 2 — [DATE TBD]
+#### Resolved This Session
+- OQ-005 → RESOLVED: Claude 3 Haiku active. Model: anthropic.claude-3-haiku-20240307-v1:0
+- Option C (pre-generated fallbacks) eliminated. Live Bedrock confirmed within budget.
+
+### Day 2 — 2026-05-13
 **Target:** xml_parser.py + stats_processor.py working locally
-**Actual:** TBD
-**Blockers:** TBD
-**Commits:** TBD
+**Actual:** Both modules complete and tested. All 5 tests pass.
+- xml_parser.py: clubs(18), players(58 Bayern), schedule(306), match parsing ✓
+- stats_processor.py: 34-player Z-score pipeline ✓
+- MVP: Michael Olise (77.02) | Kane (72.46) | Kimmich (64.12)
+- Bug caught + fixed: player filename pattern missing DFL-SEA- prefix
+  Correct pattern: 01.05.<ClubId>_DFL-SEA-0001K8.xml
+**Blockers:** None
+**Commits:** Day 2: xml_parser + stats_processor tested, all gates pass
 
 ### Day 3 — [DATE TBD]
 **Target:** engagement_mapper.py + bedrock_handler.py (2-stage chain)
