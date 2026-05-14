@@ -248,11 +248,29 @@ initialized locally with .gitignore blocking data/, credentials, venv.
 **Blockers:** None
 **Commits:** Day 2: xml_parser + stats_processor tested, all gates pass
 
-### Day 3 — [DATE TBD]
-**Target:** engagement_mapper.py + bedrock_handler.py (2-stage chain)
-**Actual:** TBD
-**Blockers:** TBD
-**Commits:** TBD
+   #### Design Decision — MVP Scope
+   **Decision:** Season MVP only. Per-match MVP dropped.
+   **Reasoning:** Match XMLs contain no per-match player stat events.
+   Only cumulative season stats available in 1K8_Bayern.xml.
+   **Framing for judges:** "Season MVP declared by data before the
+   official award panel — based on 34-matchday cumulative profile
+   across 166 statistical dimensions."
+   **Limitation statement:** Per-match MVP not possible with available
+   DFL data feed. Noted honestly in README and executive summary.
+
+### Day 3 — 2026-05-14
+**Target:** engagement_mapper.py + bedrock_handler.py
+**Actual:** Both modules complete. 3-stage pipeline passing.
+- engagement_mapper: 26,242 records loaded, 5,291 Bayern cohort,
+  5 archetypes, cohort vs individual flag added
+- bedrock_handler: Switched to Converse API + Nova Lite primary,
+  Nova Pro fallback. invoke_model removed. BEDROCK_ANTHROPIC_VER
+  now unused — commented out in config.py
+- Full pipeline: Olise MVP, Scout Report, Wrapped Card generated ✓
+- Bug identified: shots_assisted mislabeled as "assists" in prompt —
+  fixed in player_summaries field name
+**Blockers:** None
+**Commits:** Day 3: pipeline passing, Converse API, Nova Lite primary
 
 ### Day 4 — [DATE TBD]
 **Target:** Lambda wiring + API Gateway + full pipeline end-to-end

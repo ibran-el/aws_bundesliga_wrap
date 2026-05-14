@@ -19,8 +19,8 @@ S3_SEASON_ID = "0001K8"
 
 # ── BEDROCK ─────────────────────────────────────────────────────────
 BEDROCK_REGION = "eu-central-1"
-BEDROCK_MODEL_PRIMARY   = "anthropic.claude-3-haiku-20240307-v1:0"
-BEDROCK_MODEL_FALLBACK  = "amazon.nova-lite-v1:0"
+BEDROCK_MODEL_PRIMARY = "eu.amazon.nova-lite-v1:0"
+BEDROCK_MODEL_FALLBACK = "eu.amazon.nova-pro-v1:0"
 BEDROCK_MAX_TOKENS      = 1000
 BEDROCK_ANTHROPIC_VER   = "bedrock-2023-05-31"
 
