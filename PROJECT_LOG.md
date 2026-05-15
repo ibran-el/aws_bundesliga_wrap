@@ -270,13 +270,22 @@ initialized locally with .gitignore blocking data/, credentials, venv.
 - Bug identified: shots_assisted mislabeled as "assists" in prompt —
   fixed in player_summaries field name
 **Blockers:** None
-**Commits:** Day 3: pipeline passing, Converse API, Nova Lite primary
+**Commits:**
 
-### Day 4 — [DATE TBD]
+### Day 4 — 2026-05-16
 **Target:** Lambda wiring + API Gateway + full pipeline end-to-end
-**Actual:** TBD
-**Blockers:** TBD
-**Commits:** TBD
+**Actual:** All gates passed. Full HTTP pipeline live.
+- Lambda deployed via S3 (direct CLI upload failed — zip too large)
+- Windows→Linux numpy fix: --platform manylinux2014_x86_64
+- API Gateway live: o5rl18o91h.execute-api.eu-central-1.amazonaws.com/prod
+- /clubs, /mvp, /wrapped, /substitution all routed
+- Cohort profile fuzzy match fixed via partial word matching
+- Full Wrapped card returned over HTTP with correct archetype,
+  personalized narrative, MVP analysis, scout report
+- Known issues: active_months = cohort size (cosmetic for demo),
+  emoji encoding in share_text (frontend renders correctly)
+**Blockers:** None
+**Commits:** Day 4: Lambda + API Gateway live, full pipeline confirmed
 
 ### Day 5 — [DATE TBD]
 **Target:** Amplify frontend + business model + 5-slide deck
