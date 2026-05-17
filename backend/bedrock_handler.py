@@ -19,6 +19,44 @@ from config import (
 client = boto3.client('bedrock-runtime', region_name=BEDROCK_REGION)
 
 
+# ── JSON PARSING HELPER ──────────────────────────────────────────────
+
+def _parse_json_response(raw: str, fallback: dict) -> dict:
+    """
+    Safely parse JSON from Bedrock response, handling markdown formatting.
+    """
+    try:
+        # Try direct parse first
+        return json.loads(raw.strip())
+    except json.JSONDecodeError:
+        pass
+    
+    # Strip markdown code blocks
+    clean = raw.strip()
+    
+    # Handle triple backticks with optional language specifier
+    if clean.startswith('```'):
+        lines = clean.split('\n')
+        # Remove opening ``` and optional language specifier
+        if lines[0].startswith('```'):
+            lines = lines[1:]
+        # Remove closing ```
+        if lines and lines[-1].strip() == '```':
+            lines = lines[:-1]
+        clean = '\n'.join(lines).strip()
+    
+    # Handle indented code blocks (4 spaces)
+    if clean.startswith('    '):
+        lines = clean.split('\n')
+        clean = '\n'.join(line[4:] if line.startswith('    ') else line for line in lines)
+    
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError as e:
+        print(f"[bedrock] JSON parse failed: {e}\nRaw: {raw}")
+        return fallback
+
+
 # ── CORE INVOKER ─────────────────────────────────────────────────────
 
 def _invoke(prompt: str, max_tokens: int = BEDROCK_MAX_TOKENS,
@@ -116,19 +154,12 @@ Exact format:
 
     raw = _invoke(prompt, max_tokens=500)
 
-    try:
-        # Strip markdown fences if model adds them
-        clean = raw.strip()
-        if clean.startswith('```'):
-            clean = clean.split('```')[1]
-            if clean.startswith('json'):
-                clean = clean[4:]
-        return json.loads(clean.strip())
-    except json.JSONDecodeError as e:
-        print(f"[bedrock] Stage 1 JSON parse failed: {e}\nRaw: {raw}")
-        return {"mvp": top_players[0]['last_name'],
-                "mvp_reason": "Top composite Impact Score",
-                "differentiators": []}
+    fallback = {
+        "mvp": top_players[0]['last_name'],
+        "mvp_reason": "Top composite Impact Score",
+        "differentiators": []
+    }
+    return _parse_json_response(raw, fallback)
 
 
 # ── STAGE 2 — NARRATOR ───────────────────────────────────────────────
@@ -157,21 +188,13 @@ Respond ONLY with valid JSON. No preamble. No markdown.
 
     raw = _invoke(prompt, max_tokens=400)
 
-    try:
-        clean = raw.strip()
-        if clean.startswith('```'):
-            clean = clean.split('```')[1]
-            if clean.startswith('json'):
-                clean = clean[4:]
-        return json.loads(clean.strip())
-    except json.JSONDecodeError as e:
-        print(f"[bedrock] Stage 2 JSON parse failed: {e}\nRaw: {raw}")
-        return {
-            "headline": f"{analysis.get('mvp')} — Season Standout",
-            "scout_report": analysis.get('mvp_reason', ''),
-            "season_label": "The Standout",
-            "shareable_line": f"{analysis.get('mvp')} was Bayern's best. The data agrees."
-        }
+    fallback = {
+        "headline": f"{analysis.get('mvp')} — Season Standout",
+        "scout_report": analysis.get('mvp_reason', ''),
+        "season_label": "The Standout",
+        "shareable_line": f"{analysis.get('mvp')} was Bayern's best. The data agrees."
+    }
+    return _parse_json_response(raw, fallback)
 
 
 # ── STAGE 3 — WRAPPED CARD ───────────────────────────────────────────
@@ -211,23 +234,15 @@ Respond ONLY with valid JSON. No preamble. No markdown.
 
     raw = _invoke(prompt, max_tokens=600)
 
-    try:
-        clean = raw.strip()
-        if clean.startswith('```'):
-            clean = clean.split('```')[1]
-            if clean.startswith('json'):
-                clean = clean[4:]
-        return json.loads(clean.strip())
-    except json.JSONDecodeError as e:
-        print(f"[bedrock] Stage 3 JSON parse failed: {e}\nRaw: {raw}")
-        return {
-            "greeting": f"Welcome, {user_profile.get('archetype', 'fan')}",
-            "season_story": "You followed every moment this season.",
-            "fan_stat": f"{user_profile.get('total_interactions', 0)} interactions this season.",
-            "tactical_identity": tactical_style,
-            "season_verdict": "One season. Unforgettable.",
-            "share_text": "My Bundesliga Wrapped is here."
-        }
+    fallback = {
+        "greeting": f"Welcome, {user_profile.get('archetype', 'fan')}",
+        "season_story": "You followed every moment this season.",
+        "fan_stat": f"{user_profile.get('total_interactions', 0)} interactions this season.",
+        "tactical_identity": tactical_style,
+        "season_verdict": "One season. Unforgettable.",
+        "share_text": "My Bundesliga Wrapped is here."
+    }
+    return _parse_json_response(raw, fallback)
 
 
 # ── FULL PIPELINE ────────────────────────────────────────────────────
@@ -253,3 +268,120 @@ def run_full_pipeline(top_players: list[dict],
         "scout_report":  scout,
         "wrapped_card":  wrapped,
     }
+
+def analyze_substitution(
+    match_context: dict,
+    starter: dict,
+    bench_player: dict,
+    starter_stats: dict,
+    bench_stats: dict
+) -> dict:
+    """
+    Analyzes a user's proposed substitution against real match data.
+    Returns: impact delta, verdict, risk, comparison to actual result.
+    """
+
+    # Build stat delta with safe extraction
+    def safe(d, k):
+        """Safely extract numeric value from dict, default to 0."""
+        if not d:
+            return 0.0
+        val = d.get(k, 0)
+        if val is None:
+            return 0.0
+        try:
+            return round(float(val), 2)
+        except (ValueError, TypeError):
+            return 0.0
+
+    # Validate stats exist before calculating deltas
+    if not starter_stats or not bench_stats:
+        # Return neutral analysis if stats missing
+        return {
+            "synergy_score": 0,
+            "verdict": "Insufficient season data for comparison.",
+            "risk": "Limited statistical basis for analysis.",
+            "manager_rating": "Data-Limited Assessment",
+            "real_time_note": "Rich stats available for Bayern players only."
+        }
+
+    delta_impact   = safe(bench_stats, 'impact_score') - safe(starter_stats, 'impact_score')
+    delta_xg       = safe(bench_stats, 'xg') - safe(starter_stats, 'xg')
+    delta_dist     = safe(bench_stats, 'dist_per90') - safe(starter_stats, 'dist_per90')
+    delta_goals    = safe(bench_stats, 'participations_goal') - safe(starter_stats, 'participations_goal')
+
+    # Check position compatibility
+    starter_pos = starter.get('playing_position', '').upper()
+    bench_pos = bench_player.get('playing_position', '').upper()
+    position_mismatch = starter_pos != bench_pos
+
+    if position_mismatch:
+        print(f"[bedrock] Position mismatch: {starter_pos} → {bench_pos}")
+
+    prompt = f"""You are an expert Bundesliga tactical analyst with access to real season data.
+
+A fan is playing Manager Mode — they are second-guessing the real coaching decision in this match.
+
+MATCH CONTEXT:
+- Match Day: {match_context.get('match_day')}
+- Opponent: {match_context.get('opponent')}
+- Actual Result: {match_context.get('result')} (Bayern perspective)
+- Bayern Formation: {match_context.get('formation')}
+
+POSITION COMPATIBILITY:
+- Starter position: {starter_pos}
+- Bench player position: {bench_pos}
+- Position match: {'Yes' if not position_mismatch else 'No (tactical adjustment required)'}
+
+ACTUAL STARTER (who the fan wants to remove):
+- Name: {starter.get('name')}
+- Position: {starter.get('playing_position')}
+- Season Impact Score: {safe(starter_stats,'impact_score')}/100
+- Season xG: {safe(starter_stats,'xg')}
+- Goal participations: {safe(starter_stats,'participations_goal')}
+- Distance/90: {round(safe(starter_stats,'dist_per90')/1000,2)}km
+
+PROPOSED SUBSTITUTE (who the fan wants to bring on):
+- Name: {bench_player.get('name')}
+- Position: {bench_player.get('playing_position')}
+- Season Impact Score: {safe(bench_stats,'impact_score')}/100
+- Season xG: {safe(bench_stats,'xg')}
+- Goal participations: {safe(bench_stats,'participations_goal')}
+- Distance/90: {round(safe(bench_stats,'dist_per90')/1000,2)}km
+
+STAT DELTAS (substitute minus starter):
+- Impact Score delta: {round(delta_impact,2)}
+- xG delta: {round(delta_xg,2)}
+- Goal participation delta: {round(delta_goals,2)}
+- Distance/90 delta: {round(delta_dist/1000,2)}km
+
+The actual match ended: {match_context.get('result')}.
+Analyze whether this substitution would have been tactically sound given the match context and season profiles.
+
+Respond ONLY with valid JSON. No preamble. No markdown.
+{{
+  "synergy_score": <integer -10 to +10, positive means sub improves team>,
+  "verdict": "<2 sentences: would this sub have helped? grounded in the stat deltas>",
+  "risk": "<1 sentence: what tactical risk does this substitution introduce?>",
+  "manager_rating": "<creative label for this decision e.g. 'Tactical Genius' / 'Brave Call' / 'Questionable'>",
+  "real_time_note": "<1 sentence: how this decision might differ if made at a specific match minute vs end of game>"
+}}"""
+
+    raw = _invoke(prompt, max_tokens=500)
+
+    try:
+        clean = raw.strip()
+        if clean.startswith('```'):
+            clean = clean.split('```')[1]
+            if clean.startswith('json'):
+                clean = clean[4:]
+        return json.loads(clean.strip())
+    except json.JSONDecodeError as e:
+        print(f"[bedrock] substitution JSON parse failed: {e}\nRaw: {raw}")
+        return {
+            "synergy_score": round(delta_impact / 10) if delta_impact != 0 else 0,
+            "verdict": f"Based on season profiles, {bench_player.get('name')} has an Impact Score delta of {round(delta_impact,1)} vs {starter.get('name')}.",
+            "risk": "Position mismatch may disrupt team shape." if position_mismatch else "Tactical adjustment required.",
+            "manager_rating": "Tactical Thinker",
+            "real_time_note": "Timing of substitution significantly affects match dynamics."
+        }

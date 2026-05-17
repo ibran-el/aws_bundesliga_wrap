@@ -1,18 +1,27 @@
+# run from tests/
 import json
 
-with open('data/engagement.json', encoding='utf-8') as f:
-    data = json.load(f)
+with open('data/engagement.json') as f:
+    pass  # don't need this
 
-clubs = list(set(r.get('favorite_club') for r in data if r.get('favorite_club')))
-clubs.sort()
-for c in clubs[:25]:
-    print(repr(c))
+# Read schedule directly
+import sys
+sys.path.insert(0, '../backend')
 
-# add to diag_test.py
-def normalize(s):
-    return s.lower().replace('ü','u').replace('ö','o').replace('ä','a')
+# Set profile
+import boto3
+import botocore
 
-target = normalize('FC Bayern München')
-matches = [r for r in data if normalize(r.get('favorite_club','')) == target]
-print(f"Bayern matches: {len(matches)}")
-print(repr(target))
+session = boto3.Session(profile_name='emrys-dev')
+import xml_parser
+xml_parser.s3 = session.client('s3', region_name='eu-central-1')
+
+schedule = xml_parser.parse_schedule()
+bayern_id = 'DFL-CLU-00000G'
+bayern_matches = {
+    mid: fix for mid, fix in schedule.items()
+    if fix['home_team_id'] == bayern_id or fix['guest_team_id'] == bayern_id
+}
+print(f"Bayern matches: {len(bayern_matches)}")
+for mid, fix in list(bayern_matches.items())[:5]:
+    print(f"{mid} | MD{fix['match_day']} | {fix['home_name']} vs {fix['guest_name']}")

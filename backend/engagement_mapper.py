@@ -22,6 +22,23 @@ def load_engagement_data() -> list[dict]:
     resp = s3.get_object(Bucket=S3_BUCKET, Key=S3_KEYS["engagement"])
     raw = resp['Body'].read()
     data = json.loads(raw)
+    
+    # Validate data structure
+    if not isinstance(data, list):
+        print(f"[engagement_mapper] ERROR: engagement data is not a list, got {type(data)}")
+        return []
+    
+    if not data:
+        print(f"[engagement_mapper] ERROR: engagement data is empty")
+        return []
+    
+    # Validate first record has expected fields
+    first_record = data[0]
+    expected_fields = ['user_id', 'favorite_club', 'age_group', 'country']
+    missing_fields = [f for f in expected_fields if f not in first_record]
+    if missing_fields:
+        print(f"[engagement_mapper] WARNING: engagement records missing fields: {missing_fields}")
+    
     print(f"[engagement_mapper] loaded {len(data)} records")
     return data
 
@@ -171,22 +188,18 @@ def get_club_cohort_profile(favorite_club: str,
     Used when judge inputs a club but no matching user_id exists.
     Returns averaged/summed cohort stats as a synthetic profile.
     """
-
-    print(f"[engagement_mapper] INPUT: {repr(favorite_club)}")
+    if not favorite_club:
+        return {}
     
-    sample = list(set(r.get('favorite_club','') for r in data[:500] if r.get('favorite_club')))[:5]
-    print(f"[engagement_mapper] SAMPLE CLUBS: {sample}")
-    # Normalize for matching
-    def normalize(s):
-        return s.lower().replace('ü','u').replace('ö','o').replace('ä','a')
+    # Exact match first
+    club_records = [r for r in data if r.get('favorite_club', '') == favorite_club]
     
+    # If no exact match, try case-insensitive match
+    if not club_records:
+        favorite_club_lower = favorite_club.lower()
+        club_records = [r for r in data 
+                       if r.get('favorite_club', '').lower() == favorite_club_lower]
     
-    target = normalize(favorite_club)
-    print(f"[engagement_mapper] searching for: {repr(favorite_club)}")
-    print(f"[engagement_mapper] sample club names: {list(set(r.get('favorite_club','') for r in data[:100] if r.get('favorite_club')))[:5]}")
-
-    club_records = [r for r in data
-                    if r.get('favorite_club', '') == favorite_club]
     if not club_records:
         print(f"[engagement_mapper] WARNING: no users for {favorite_club}")
         return {}

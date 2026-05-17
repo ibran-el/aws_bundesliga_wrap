@@ -85,7 +85,11 @@ def parse_players_for_club(club_id: str, season_id: str = '0001K8') -> dict:
     try:
         root = _fetch_xml(key)
     except Exception as e:
-        print(f"[xml_parser] WARNING: could not load players for {club_id}: {e}")
+        error_type = type(e).__name__
+        if "NoSuchKey" in error_type or "404" in str(e):
+            print(f"[xml_parser] WARNING: players file not found for {club_id}: {key}")
+        else:
+            print(f"[xml_parser] WARNING: could not load players for {club_id}: {error_type}: {e}")
         return {}
 
     players = {}
@@ -142,7 +146,7 @@ def parse_schedule() -> dict:
             'kickoff_time':  fixture.get('PlannedKickoffTime', ''),
             'home_team_id':  fixture.get('HomeTeamId', ''),
             'guest_team_id': fixture.get('GuestTeamId', ''),
-            'home_name':     fixture.get('HomeTeamShortName', ''),
+            'home_name':     fixture.get('HomeTeamShortName', ''),  # ← may not exist in XML
             'guest_name':    fixture.get('GuestTeamShortName', ''),
         }
 

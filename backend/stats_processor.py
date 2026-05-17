@@ -38,11 +38,18 @@ def extract_player_stats(root: ET.Element) -> list[dict]:
 
         def t(attr):
             """Parse HH:MM:SS playing time → minutes float."""
-            val = ps.get(attr, '0:00:00') or '0:00:00'
+            val = ps.get(attr) or '0:00:00'
+            if not val or not isinstance(val, str):
+                return 0.0
             try:
                 parts = val.split(':')
-                return int(parts[0]) * 60 + int(parts[1]) + int(parts[2]) / 60
-            except Exception:
+                if len(parts) != 3:
+                    return 0.0
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                seconds = int(parts[2])
+                return hours * 60 + minutes + seconds / 60
+            except (ValueError, IndexError, AttributeError):
                 return 0.0
 
         playing_minutes = t('PlayingTime')
