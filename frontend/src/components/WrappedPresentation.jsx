@@ -736,13 +736,13 @@ export default function WrappedPresentation({ data, club, onClose }) {
               <div className="wp-s4-pitch isometric-field">
                 <div className="wp-pitch-markings" />
                 {/* Zone overlays — proportional opacity */}
-                <div className="wp-zone wp-zone-top" style={{ background: clr, opacity: pct(tickerTotal) === 0 ? 0 : 0.2 + (pct(tickerTotal) / 100) * 0.6 }}>
+                <div className="wp-zone wp-zone-top" style={{ background: pct(tickerTotal) === 0 ? 'transparent' : `rgba(${hexToRgb(clr)},${(0.2 + (pct(tickerTotal) / 100) * 0.6).toFixed(2)})` }}>
                   <span className="wp-zone-label" style={{color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>LIVE TICKER<br/>{pct(tickerTotal)}%</span>
                 </div>
-                <div className="wp-zone wp-zone-mid" style={{ background: '#3b82f6', opacity: pct(statsTotal) === 0 ? 0 : 0.2 + (pct(statsTotal) / 100) * 0.6 }}>
+                <div className="wp-zone wp-zone-mid" style={{ background: pct(statsTotal) === 0 ? 'transparent' : `rgba(59,130,246,${(0.2 + (pct(statsTotal) / 100) * 0.6).toFixed(2)})` }}>
                   <span className="wp-zone-label" style={{color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>STATS ROOM<br/>{pct(statsTotal)}%</span>
                 </div>
-                <div className="wp-zone wp-zone-bot" style={{ background: '#10b981', opacity: pct(lineupsTotal) === 0 ? 0 : 0.2 + (pct(lineupsTotal) / 100) * 0.6 }}>
+                <div className="wp-zone wp-zone-bot" style={{ background: pct(lineupsTotal) === 0 ? 'transparent' : `rgba(16,185,129,${(0.2 + (pct(lineupsTotal) / 100) * 0.6).toFixed(2)})` }}>
                   <span className="wp-zone-label" style={{color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>LINEUPS<br/>{pct(lineupsTotal)}%</span>
                 </div>
               </div>
