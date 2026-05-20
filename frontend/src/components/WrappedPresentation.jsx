@@ -501,12 +501,7 @@ export default function WrappedPresentation({ data, club, onClose }) {
            onPointerUp={() => setIsHolding(false)}
            onPointerLeave={() => setIsHolding(false)}>
 
-        {/* Notch */}
-        <div className="wp-notch">
-          <span className="wp-notch-time">18:48</span>
-          <div className="wp-notch-pill" />
-          <span className="wp-notch-signal">5G</span>
-        </div>
+
 
 
 
