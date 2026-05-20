@@ -736,17 +736,17 @@ export default function WrappedPresentation({ data, club, onClose }) {
               <div className="wp-s4-pitch isometric-field">
                 <div className="wp-pitch-markings" />
                 {/* Zone overlays — proportional opacity */}
-                <div className="wp-zone wp-zone-top" style={{position:'relative'}}>
+                <div className="wp-zone wp-zone-top">
                   <div style={{position:'absolute',inset:0,background:clr,opacity:0.15+(pct(tickerTotal)/100)*0.65}}/>
-                  <span className="wp-zone-label" style={{position:'relative',color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>LIVE TICKER<br/>{pct(tickerTotal)}%</span>
+                  <span className="wp-zone-label" style={{position:'relative',zIndex:1,color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>LIVE TICKER<br/>{pct(tickerTotal)}%</span>
                 </div>
-                <div className="wp-zone wp-zone-mid" style={{position:'relative'}}>
+                <div className="wp-zone wp-zone-mid">
                   <div style={{position:'absolute',inset:0,background:'#3b82f6',opacity:0.15+(pct(statsTotal)/100)*0.65}}/>
-                  <span className="wp-zone-label" style={{position:'relative',color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>STATS ROOM<br/>{pct(statsTotal)}%</span>
+                  <span className="wp-zone-label" style={{position:'relative',zIndex:1,color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>STATS ROOM<br/>{pct(statsTotal)}%</span>
                 </div>
-                <div className="wp-zone wp-zone-bot" style={{position:'relative'}}>
+                <div className="wp-zone wp-zone-bot">
                   <div style={{position:'absolute',inset:0,background:'#10b981',opacity:0.15+(pct(lineupsTotal)/100)*0.65}}/>
-                  <span className="wp-zone-label" style={{position:'relative',color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>LINEUPS<br/>{pct(lineupsTotal)}%</span>
+                  <span className="wp-zone-label" style={{position:'relative',zIndex:1,color:'#fff',fontSize:11,textShadow:'0 1px 2px rgba(0,0,0,1), 0 2px 3px rgba(0,0,0,1)'}}>LINEUPS<br/>{pct(lineupsTotal)}%</span>
                 </div>
               </div>
             </div>
