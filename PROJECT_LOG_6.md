@@ -505,3 +505,43 @@ Branch `main` is now live at `https://github.com/ibran-el/aws_bundesliga_wrap`.
 | PRFAQ.md → prfaq.pdf | ⏳ Session prompt ready |
 | EXECUTIVE_SUMMARY_CONTENT.md → executive_summary.pdf | ⏳ Session prompt ready |
 | VIDEO_SCRIPT.md → presentation_video.mp4 | ⏳ Session prompt ready |
+
+---
+
+## Session 15 — Amplify Deployment + Live URL
+**Hours:** ~0.5 hrs | **Status:** ✅ Complete
+
+### What Was Fixed
+
+Three deployment failures resolved:
+
+| Attempt | Error | Fix |
+|---|---|---|
+| 1 | `Monorepo spec provided without "applications" key` | Added root-level `amplify.yml` with `applications` + `appRoot: frontend` |
+| 2 | `npm ci` fails — no `package-lock.json` in repo | Changed `npm ci` → `npm install` in `amplify.yml` |
+| 3 | `Could not read package.json` — not tracked in git | Root `.gitignore` had `*.json` blocking `frontend/package.json`; scoped rule to data files only; force-added `package.json` + `package-lock.json` |
+
+### Files Added/Changed
+- `amplify.yml` (repo root) — monorepo build config
+- `frontend/package.json` — now tracked in git
+- `frontend/package-lock.json` — now tracked in git
+- `.gitignore` — `*.json` replaced with `bundesliga_*.json` + `*_dataset.json`
+- `github_link.txt` — submission artifact with both URLs
+
+### Live URLs
+| Resource | URL |
+|---|---|
+| **Live App** | https://main.dfyp9mw2b5bs6.amplifyapp.com/ |
+| **GitHub Repo** | https://github.com/ibran-el/aws_bundesliga_wrap |
+| **API Gateway** | https://o5rl18o91h.execute-api.eu-central-1.amazonaws.com/prod |
+
+### Deliverable Status — Updated
+| Item | Status |
+|---|---|
+| ✅ Code on GitHub | `https://github.com/ibran-el/aws_bundesliga_wrap` |
+| ✅ Live app on Amplify | `https://main.dfyp9mw2b5bs6.amplifyapp.com/` |
+| ✅ `github_link.txt` | Written to repo root |
+| ⏳ README.md | Session prompt ready — insert live URL |
+| ⏳ PRFAQ → prfaq.pdf | Session prompt ready |
+| ⏳ Executive summary → executive_summary.pdf | Session prompt ready |
+| ⏳ Demo video → presentation_video.mp4 | Session prompt ready — insert live URL |
