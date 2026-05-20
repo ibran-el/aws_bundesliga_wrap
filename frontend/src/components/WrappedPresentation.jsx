@@ -207,6 +207,11 @@ export default function WrappedPresentation({ data, club, onClose }) {
     if (ctx) soundFn(ctx, ...args)
   }, [muted])
 
+  // Haptic helper — safe no-op if not supported
+  const haptic = useCallback((pattern = [30]) => {
+    try { navigator.vibrate && navigator.vibrate(pattern) } catch { /* ignore */ }
+  }, [])
+
   // ── Navigation ────────────────────────────────────────────────────────────
     const selectSlide = useCallback((index) => {
     setCurrentSlide(index)
@@ -314,6 +319,7 @@ export default function WrappedPresentation({ data, club, onClose }) {
     const startScratch = (e) => { isDrawingRef.current = true; doScratch(e) }
     const doScratch = (e) => {
       if (!isDrawingRef.current) return
+      e.preventDefault()
       const { x, y } = getCoords(e)
       ctx.globalCompositeOperation = 'destination-out'
       ctx.beginPath(); ctx.arc(x, y, 38, 0, Math.PI * 2); ctx.fill()
@@ -327,6 +333,7 @@ export default function WrappedPresentation({ data, club, onClose }) {
         setIsScratched(true)
         play(Sounds.reveal)
         setFrameShake(true)
+        haptic([40, 30, 60])
         setIsPaused(false)
         setTimeout(nextSlide, 1400) // auto-advance after reveal
       }
@@ -378,10 +385,10 @@ export default function WrappedPresentation({ data, club, onClose }) {
     if (currentSlide !== 6) return
     setStickerProgress(0)
     const timers = [
-      setTimeout(() => { setStickerProgress(1); play(Sounds.stickerDrop, 0); setFrameShake(true) }, 500),
-      setTimeout(() => { setStickerProgress(2); play(Sounds.stickerDrop, 1); setFrameShake(true) }, 1200),
-      setTimeout(() => { setStickerProgress(3); play(Sounds.stickerDrop, 2); setFrameShake(true) }, 2000),
-      setTimeout(() => { setStickerProgress(4); play(Sounds.stickerDrop, 3); setFrameShake(true) }, 2800),
+      setTimeout(() => { setStickerProgress(1); play(Sounds.stickerDrop, 0); setFrameShake(true); haptic([25]) }, 500),
+      setTimeout(() => { setStickerProgress(2); play(Sounds.stickerDrop, 1); setFrameShake(true); haptic([25]) }, 1200),
+      setTimeout(() => { setStickerProgress(3); play(Sounds.stickerDrop, 2); setFrameShake(true); haptic([25]) }, 2000),
+      setTimeout(() => { setStickerProgress(4); play(Sounds.stickerDrop, 3); setFrameShake(true); haptic([25]) }, 2800),
     ]
     return () => timers.forEach(clearTimeout)
   }, [currentSlide, play])
@@ -392,34 +399,39 @@ export default function WrappedPresentation({ data, club, onClose }) {
     const correct = guess === quizCorrect
     play(correct ? Sounds.correct : Sounds.wrong)
     setFrameShake(true)
+    haptic(correct ? [20, 10, 20] : [80])
     setTimeout(nextSlide, 2200)
   }
 
-  // ── Export handler — screenshot the card then share as image ────────────
+  // ── Export handler — capture hidden 9:16 share card then share as image ──
   const handleExport = async () => {
     play(Sounds.export)
+    haptic([20, 10, 40])
     setCopied(false)
 
-    // Try to screenshot the card element
+    // Capture the hidden 9:16 share card — guaranteed clean, no animation artifacts
     let imageFile = null
-    if (cardRef.current) {
+    const hiddenCard = document.getElementById('wp-hidden-share-card')
+    if (hiddenCard) {
       try {
-        const canvas = await html2canvas(cardRef.current, {
-          backgroundColor: '#0a0a0f',
-          scale: 2,          // retina quality
+        const canvas = await html2canvas(hiddenCard, {
+          backgroundColor: null,
+          scale: 2,
           useCORS: true,
           logging: false,
+          width: 540,
+          height: 960,
         })
         const blob = await new Promise(res => canvas.toBlob(res, 'image/png'))
         if (blob) {
           imageFile = new File([blob], 'bundesliga-wrapped.png', { type: 'image/png' })
         }
       } catch (e) {
-        console.warn('Screenshot failed:', e)
+        console.warn('Share card capture failed:', e)
       }
     }
 
-    // navigator.share with image (works on mobile — Instagram, WhatsApp)
+    // Native share with image file (mobile — Instagram, WhatsApp, etc.)
     if (imageFile && navigator.canShare && navigator.canShare({ files: [imageFile] })) {
       try {
         await navigator.share({
@@ -429,22 +441,12 @@ export default function WrappedPresentation({ data, club, onClose }) {
         })
         return
       } catch (e) {
-        if (e.name !== 'AbortError') console.warn('Share failed:', e)
-        return
-      }
-    }
-
-    // Fallback 1: share text only (works on desktop with Web Share API)
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: 'My Bundesliga Wrapped 2024/25', text: shareText })
-        return
-      } catch (e) {
         if (e.name === 'AbortError') return
+        console.warn('File share failed, trying fallback:', e)
       }
     }
 
-    // Fallback 2: download the image directly
+    // Fallback 1: download as PNG
     if (imageFile) {
       const url = URL.createObjectURL(imageFile)
       const a = document.createElement('a')
@@ -457,10 +459,18 @@ export default function WrappedPresentation({ data, club, onClose }) {
       return
     }
 
-    // Last resort: copy share text to clipboard
-    try {
-      await navigator.clipboard.writeText(shareText)
-    } catch { /* ignore */ }
+    // Fallback 2: text share
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'My Bundesliga Wrapped 2024/25', text: shareText })
+        return
+      } catch (e) {
+        if (e.name === 'AbortError') return
+      }
+    }
+
+    // Last resort: copy text to clipboard
+    try { await navigator.clipboard.writeText(shareText) } catch { /* ignore */ }
     setCopied(true)
     setTimeout(() => setCopied(false), 2500)
   }
@@ -480,7 +490,14 @@ export default function WrappedPresentation({ data, club, onClose }) {
       {/* ── Phone frame ── */}
       <div className={`wp-phone${frameShake ? ' wp-shake' : ''}`}
            onAnimationEnd={() => setFrameShake(false)}
-           onPointerDown={() => setIsHolding(true)}
+           onPointerDown={(e) => {
+             const rect = e.currentTarget.getBoundingClientRect()
+             const relX = (e.clientX - rect.left) / rect.width
+             const relY = (e.clientY - rect.top) / rect.height
+             if (relX > 0.2 && relX < 0.8 && relY > 0.2 && relY < 0.8) {
+               setIsHolding(true)
+             }
+           }}
            onPointerUp={() => setIsHolding(false)}
            onPointerLeave={() => setIsHolding(false)}>
 
@@ -491,19 +508,7 @@ export default function WrappedPresentation({ data, club, onClose }) {
           <span className="wp-notch-signal">5G</span>
         </div>
 
-        {/* Hold indicator */}
-        {isHolding && (
-          <div style={{
-            position: 'absolute', top: '50%', left: '50%',
-            transform: 'translate(-50%,-50%)',
-            background: 'rgba(0,0,0,0.55)', borderRadius: 8,
-            padding: '6px 14px', zIndex: 70, pointerEvents: 'none',
-          }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'white',
-              letterSpacing: '2px', fontFamily: 'Space Grotesk, sans-serif',
-              textTransform: 'uppercase' }}>⏸ HOLD</span>
-          </div>
-        )}
+
 
         {/* Close button */}
         <button className="wp-close-btn" onClick={onClose} aria-label="Close presentation">
@@ -737,13 +742,13 @@ export default function WrappedPresentation({ data, club, onClose }) {
                 <div className="wp-pitch-markings" />
                 {/* Zone overlays — proportional opacity */}
                 <div className="wp-zone wp-zone-top" style={{ background: clr, opacity: 0.2 + (pct(tickerTotal) / 100) * 0.6 }}>
-                  <span className="wp-zone-label">LIVE TICKER<br/>{pct(tickerTotal)}%</span>
+                  <span className="wp-zone-label" style={{color:'#fff',textShadow:'0 1px 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.8)'}}>LIVE TICKER<br/>{pct(tickerTotal)}%</span>
                 </div>
                 <div className="wp-zone wp-zone-mid" style={{ background: '#3b82f6', opacity: 0.2 + (pct(statsTotal) / 100) * 0.6 }}>
-                  <span className="wp-zone-label">STATS ROOM<br/>{pct(statsTotal)}%</span>
+                  <span className="wp-zone-label" style={{color:'#fff',textShadow:'0 1px 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.8)'}}>STATS ROOM<br/>{pct(statsTotal)}%</span>
                 </div>
                 <div className="wp-zone wp-zone-bot" style={{ background: '#10b981', opacity: 0.2 + (pct(lineupsTotal) / 100) * 0.6 }}>
-                  <span className="wp-zone-label">LINEUPS<br/>{pct(lineupsTotal)}%</span>
+                  <span className="wp-zone-label" style={{color:'#fff',textShadow:'0 1px 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.8)'}}>LINEUPS<br/>{pct(lineupsTotal)}%</span>
                 </div>
               </div>
             </div>
@@ -812,6 +817,79 @@ export default function WrappedPresentation({ data, club, onClose }) {
             <p className="wp-muted-xs wp-center">Tap your prediction</p>
           </div>
         )}
+
+        {/* ── Hidden share card — captured by html2canvas on share ── */}
+        <div
+          id="wp-hidden-share-card"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: '-9999px',
+            width: 540,
+            height: 960,
+            background: `linear-gradient(160deg, ${clr} 0%, #0a0a0f 45%)`,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '48px 36px',
+            fontFamily: 'Oswald, sans-serif',
+            overflow: 'hidden',
+            gap: 0,
+          }}
+        >
+          {/* Top accent bar */}
+          <div style={{position:'absolute',top:0,left:0,right:0,height:6,background:clr}}/>
+          {/* Club badge */}
+          <div style={{
+            background:'rgba(255,255,255,0.1)',border:`2px solid ${clr}`,
+            borderRadius:12,padding:'8px 24px',marginBottom:32,
+          }}>
+            <span style={{fontSize:18,fontWeight:700,letterSpacing:4,color:'#fff',textTransform:'uppercase'}}>
+              {club?.three_letter_code || 'BL'} · 2024/25
+            </span>
+          </div>
+          {/* Name */}
+          <h1 style={{fontSize:72,fontWeight:700,letterSpacing:4,color:'#fff',textTransform:'uppercase',textAlign:'center',lineHeight:0.9,marginBottom:16}}>
+            {userName.toUpperCase()}
+          </h1>
+          {/* Archetype */}
+          <p style={{fontSize:20,color:`${clr}`,letterSpacing:3,textTransform:'uppercase',marginBottom:48,textAlign:'center'}}>
+            {archetype}
+          </p>
+          {/* Stats row */}
+          <div style={{display:'flex',gap:24,marginBottom:48}}>
+            {[
+              {value: engScore, label: 'FAN SCORE'},
+              {value: displayRank > 0 ? `#${displayRank}` : '—', label: 'CLUB RANK'},
+              {value: totalInteractions > 999 ? `${(totalInteractions/1000).toFixed(1)}K` : totalInteractions, label: 'INTERACTIONS'},
+            ].map(({value,label}) => (
+              <div key={label} style={{textAlign:'center'}}>
+                <div style={{fontSize:36,fontWeight:700,color:clr,letterSpacing:2}}>{value}</div>
+                <div style={{fontSize:10,color:'rgba(255,255,255,0.5)',letterSpacing:2,marginTop:4}}>{label}</div>
+              </div>
+            ))}
+          </div>
+          {/* Season arc */}
+          <div style={{
+            background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.12)',
+            borderRadius:12,padding:'16px 28px',marginBottom:24,textAlign:'center',width:'100%',
+          }}>
+            <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',letterSpacing:2,marginBottom:6}}>SEASON ARC</div>
+            <div style={{fontSize:28,fontWeight:700,color:'#fff',letterSpacing:2}}>{arcShape.toUpperCase()}</div>
+            <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',marginTop:4}}>{loyaltyClass}</div>
+          </div>
+          {/* Quote */}
+          {(fanDna || fanIdentity) && (
+            <p style={{fontSize:13,color:'rgba(255,255,255,0.5)',textAlign:'center',lineHeight:1.6,fontFamily:'Space Grotesk, sans-serif',fontStyle:'italic',maxWidth:400,marginBottom:32}}>
+              "{(fanDna || fanIdentity).slice(0,100)}"
+            </p>
+          )}
+          {/* Footer */}
+          <div style={{position:'absolute',bottom:32,left:0,right:0,textAlign:'center'}}>
+            <div style={{fontSize:10,color:'rgba(255,255,255,0.25)',letterSpacing:3}}>#BUNDESLIGAWRAPPED · POWERED BY AWS BEDROCK</div>
+          </div>
+        </div>
 
         {/* ── SLIDE 6: Export sticker bomb ── */}
         {currentSlide === 6 && (
