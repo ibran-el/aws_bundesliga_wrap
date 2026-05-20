@@ -26,6 +26,10 @@ DATA_REFERENCE.md
 Challenge_1_Bundesliga_Wrapped_Extracted.md
 ARCHITECTURE.md
 
+# Internal project logs and submission artifacts — local only
+PROJECT_LOG*.md
+github_link.txt
+
 # IDE / Kiro workspace
 .kiro/
 *.code-workspace

@@ -1,2 +1,0 @@
-GitHub Repository: https://github.com/ibran-el/aws_bundesliga_wrap
-Live App (AWS Amplify): https://main.dfyp9mw2b5bs6.amplifyapp.com/
