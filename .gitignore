@@ -12,8 +12,10 @@ credentials
 # Hackathon data — contest rules forbid uploading raw data
 data/
 *.xml
-*.json
 *.mp4
+# Raw data JSON files only — NOT frontend package.json/package-lock.json
+bundesliga_*.json
+*_dataset.json
 
 # IDE / Kiro workspace
 .kiro/
