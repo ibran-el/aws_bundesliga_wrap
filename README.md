@@ -2,7 +2,7 @@
 
 > "The Manager's Wrapped: From Passive Fan to Tactical Coach"
 
-A Spotify Wrapped–style personalized season recap for Bundesliga fans, extended with interactive tactical features. Built for the AWS Sports AI Innovation Hackathon @ CMU-Africa (Challenge 1).
+A personalized season recap for Bundesliga fans — built on real DFL data and Amazon Bedrock. Extended with interactive tactical features. Built for the AWS Sports AI Innovation Hackathon @ CMU-Africa (Challenge 1).
 
 **Live app:** https://main.dfyp9mw2b5bs6.amplifyapp.com/
 
@@ -92,7 +92,7 @@ Deep stat comparison grid (Impact Score, xG, goal participations) available for 
 
 ### Backend
 
-**Prerequisites:** Python 3.12, AWS credentials configured as profile `emrys-dev`.
+**Prerequisites:** Python 3.12, AWS credentials configured as profile `emrys-dev (you can use your own profile instead, replace this in any command it appears)`.
 
 ```bash
 # Create and activate virtual environment
@@ -227,8 +227,6 @@ MatchId: Schedule XML ↔ Match XML
 ## Team & Submission
 
 **Hackathon:** AWS World Sports Innovation Cup 2026 — Challenge 1: Bundesliga Wrapped  
-**Team:** ibran-el  
+**Team:** ibran-el  (Nicholaus [Emrys] Ladislaus)
 **GitHub:** https://github.com/ibran-el/aws_bundesliga_wrap  
 **Live app:** https://main.dfyp9mw2b5bs6.amplifyapp.com/
-
-Submission artifacts (zip): `github_link.txt`, `presentation_video.mp4`, `executive_summary.pdf`, `prfaq.pdf`.

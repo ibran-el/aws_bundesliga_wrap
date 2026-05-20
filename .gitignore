@@ -17,6 +17,15 @@ data/
 bundesliga_*.json
 *_dataset.json
 
+# Submission documents — kept local, not committed to repo
+PRFAQ.md
+EXECUTIVE_SUMMARY.md
+VIDEO_SCRIPT.md
+SLIDE_DECK_PROMPT.md
+DATA_REFERENCE.md
+Challenge_1_Bundesliga_Wrapped_Extracted.md
+ARCHITECTURE.md
+
 # IDE / Kiro workspace
 .kiro/
 *.code-workspace
