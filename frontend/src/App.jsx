@@ -1,570 +1,1384 @@
-import { useState, useEffect } from 'react'
-import './App.css'
-import { ClubSelector } from './components/ClubSelector'
-import { JudgeInputForm } from './components/JudgeInputForm'
-import WrappedCard from './components/WrappedCard'
-import WrappedCardReveal from './components/WrappedCardReveal'
-import MVPCard from './components/MVPCard'
-import { MatchPicker } from './components/MatchPicker'
-import { BenchSelector } from './components/BenchSelector'
-import TacticalAnalysisCard from './components/TacticalAnalysisCard'
-import { fetchWrapped, fetchMVP, fetchSubstitution, fetchAnalyzeSub } from './api'
-import { Spinner } from './components/Spinner'
-import Toast from './components/Toast'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import './index.css'
+import { fetchClubs, fetchWrapped, fetchMVP, fetchSubstitution, fetchAnalyzeSub } from './api'
+import WrappedPresentation from './components/WrappedPresentation'
 
-/**
- * App.jsx - Root Component with Global State Management
- * 
- * Manages all application state and routing logic for Bundesliga Wrapped.
- * Views: landing, input, wrapped, mvp, substitution
- * 
- * State Management:
- * - currentView: which view is currently displayed
- * - User input: userName, selectedClub, tacticalStyle
- * - Data: wrappedData, mvpData, selectedMatch, selectedStarter, selectedBench, analysisResult
- * - UI: loading, error
- */
+const STYLES = ['High Press', 'Possession', 'Counter-Attack']
 
-// Landing Page Component
-function LandingPage({ onNavigateToInput }) {
+// ─────────────────────────────────────────────
+// CINEMATIC REVEAL SCREEN
+// State machine: flash → name → archetype → stat0 → stat1 → stat2 → mvp → done
+// ─────────────────────────────────────────────
+const PHASES = ['flash', 'name', 'archetype', 'stat0', 'stat1', 'stat2', 'global', 'persona', 'mvp', 'done']
+const PHASE_DURATION = {
+  flash:     900,
+  name:      3200,
+  archetype: 3200,
+  stat0:     4500,
+  stat1:     4500,
+  stat2:     4500,
+  global:    5000,   // global/club rank counter + reading
+  persona:   4200,   // match center identity + content diet + fan identity sentence
+  mvp:       5000,
+  done:      0,
+}
+
+// Scramble text effect
+function useScramble(target, active) {
+  const [display, setDisplay] = useState('')
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  const raf = useRef(null)
+  const start = useRef(null)
+
+  useEffect(() => {
+    if (!active || !target) return
+    const duration = 900
+    const step = ts => {
+      if (!start.current) start.current = ts
+      const prog = Math.min((ts - start.current) / duration, 1)
+      const revealed = Math.floor(prog * target.length)
+      const scrambled = target.slice(0, revealed) +
+        target.slice(revealed).split('').map(() => chars[Math.floor(Math.random() * chars.length)]).join('')
+      setDisplay(scrambled)
+      if (prog < 1) raf.current = requestAnimationFrame(step)
+      else setDisplay(target)
+    }
+    raf.current = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf.current)
+  }, [target, active])
+
+  return display
+}
+
+// Animated counter hook
+function useCounter(target, active, duration = 1200) {
+  const [value, setValue] = useState(0)
+  const raf = useRef(null)
+  const start = useRef(null)
+
+  useEffect(() => {
+    if (!active) return
+    const end = Number(target) || 0
+    if (end === 0) { setValue(0); return }
+    start.current = null
+    const step = ts => {
+      if (!start.current) start.current = ts
+      const prog = Math.min((ts - start.current) / duration, 1)
+      const ease = 1 - Math.pow(1 - prog, 3) // ease-out cubic
+      setValue(Math.floor(ease * end))
+      if (prog < 1) raf.current = requestAnimationFrame(step)
+      else setValue(end)
+    }
+    raf.current = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf.current)
+  }, [target, active])
+
+  return value
+}
+
+// Particle burst
+function Particles({ color }) {
+  const count = 18
+  const items = Array.from({ length: count }, (_, i) => {
+    const angle = (i / count) * 360
+    const dist = 80 + Math.random() * 120
+    const dx = `${Math.cos(angle * Math.PI / 180) * dist}px`
+    const dy = `${Math.sin(angle * Math.PI / 180) * dist}px`
+    const size = 3 + Math.random() * 5
+    return { dx, dy, size, delay: Math.random() * 0.2 }
+  })
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 to-indigo-50">
-      <div className="text-center max-w-2xl">
-        <h1 className="text-5xl md:text-6xl font-bold mb-4 text-gray-900">Bundesliga Wrapped</h1>
-        <p className="text-xl md:text-2xl text-gray-700 mb-6">The Manager's Wrapped: From Passive Fan to Tactical Coach</p>
-        <p className="text-lg text-gray-600 mb-8">Explore your personalized season recap and tactical insights powered by AI</p>
-        <button
-          onClick={onNavigateToInput}
-          className="px-8 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors text-lg"
-          aria-label="Start creating your wrapped"
-        >
-          Get Started →
+    <div style={{ position: 'absolute', top: '50%', left: '50%', pointerEvents: 'none', zIndex: 6 }}>
+      {items.map((p, i) => (
+        <div key={i} style={{
+          position: 'absolute',
+          top: 0, left: 0,
+          width: p.size, height: p.size,
+          borderRadius: '50%',
+          background: color || 'var(--accent)',
+          '--dx': p.dx,
+          '--dy': p.dy,
+          animation: `particleFly 0.8s ${p.delay}s cubic-bezier(0.2,0,0.8,1) both`,
+        }}/>
+      ))}
+    </div>
+  )
+}
+
+function RevealScreen({ data, club, onDone }) {
+  const [phaseIdx, setPhaseIdx] = useState(0)
+  const [key, setKey] = useState(0) // force re-mount for re-animation
+  const timer = useRef(null)
+
+  const phase = PHASES[phaseIdx]
+  const clr = safeColor(club.primary_color) || '#d4001a'
+  const { profile, mvp_analysis, scout_report, wrapped_card } = data
+
+  const mvpName = mvp_analysis?.mvp || mvp_analysis?.players?.[0]?.name || 'Top Performer'
+  const mvpScore = mvp_analysis?.players?.[0]?.impact_score
+  const userName = profile?.user_name || 'Manager'
+  const archetype = profile?.archetype || 'Football Fan'
+
+  // Core stats
+  const totalInteractions = profile?.total_interactions ?? 0
+  const matchCenter       = profile?.total_match_center ?? 0
+  const engScore          = profile?.engagement_score ?? 0
+  const totalVideos       = profile?.total_videos ?? 0
+  const totalStories      = profile?.total_stories ?? 0
+  const favVideo          = profile?.favorite_video
+  const country           = profile?.country || ''
+
+  // New KPI fields
+  const fanCount_r         = profile?.fan_count ?? 0
+  const engScore_r         = profile?.engagement_score ?? 0
+  // Derive club rank: position ≈ fanCount × (1 − percentile/100), clamped [1, fanCount]
+  const derivedRankReveal  = fanCount_r > 0 && engScore_r > 0
+    ? Math.max(1, Math.round(fanCount_r * (1 - engScore_r / 100)))
+    : 0
+  const globalRankPos      = profile?.club_rank_position || derivedRankReveal
+  const totalFans          = fanCount_r
+  const globalRank         = profile?.global_rank ?? engScore_r
+  const matchCenterPersona = profile?.match_center_persona || ''
+  const contentDietType    = profile?.content_diet_type || ''
+  const arcShape           = profile?.arc_shape || ''
+  const loyaltyClass       = profile?.loyalty_class || ''
+  const peakMonth          = profile?.peak_month || ''
+  const peakMonthRange     = profile?.peak_month_matchday_range || ''
+  const maxStreak          = profile?.max_streak ?? 0
+  const streakPeriod       = profile?.streak_period || ''
+  const localeClass        = profile?.locale_class || ''
+  const isInternational    = profile?.is_international || false
+  const supermatchContext  = profile?.supermatch_context || ''
+
+  // Format peak month for display (2025-05-01 → May 2025)
+  const fmtMonth = (str) => {
+    if (!str) return ''
+    try {
+      return new Date(str).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+    } catch { return str.slice(0, 7) }
+  }
+
+  const stats = [
+    {
+      value:    totalInteractions,
+      label:    'Total Interactions',
+      sublabel: 'moments with the Bundesliga this season',
+      context:  `${totalVideos.toLocaleString()} videos · ${totalStories.toLocaleString()} stories`,
+    },
+    {
+      value:    matchCenter,
+      label:    'Match Center Visits',
+      sublabel: 'times you checked the live match',
+      context:  wrapped_card?.tactical_identity || '',
+    },
+    {
+      value:    engScore,
+      label:    'Fan Score',
+      sublabel: 'percentile rank among your club fans',
+      context:  arcShape ? `${arcShape} season arc` : (archetype + (country ? ` · ${country}` : '')),
+    },
+  ]
+
+  const advance = useCallback(() => {
+    setPhaseIdx(i => {
+      const next = i + 1
+      if (PHASES[next] === 'done') { onDone(); return next }
+      return next
+    })
+    setKey(k => k + 1)
+  }, [onDone])
+
+  const skip = () => { clearTimeout(timer.current); onDone() }
+
+  useEffect(() => {
+    if (phase === 'done') return
+    const dur = PHASE_DURATION[phase]
+    timer.current = setTimeout(advance, dur)
+    return () => clearTimeout(timer.current)
+  }, [phase, advance])
+
+  // Scramble for name phase — runs for 1.5s then holds
+  const scrambled = useScramble(userName.toUpperCase(), phase === 'name')
+
+  // Counters for stat phases — 2s each to fill the longer phase
+  const s0 = useCounter(stats[0].value, phase === 'stat0', 2000)
+  const s1 = useCounter(stats[1].value, phase === 'stat1', 2000)
+  const s2 = useCounter(stats[2].value, phase === 'stat2', 2000)
+  const globalCounter = useCounter(globalRankPos, phase === 'global', 2400)
+  const statValues = [s0, s1, s2]
+  const fmtNum = n => {
+    if (n >= 1000000) return `${(n/1000000).toFixed(1)}M`
+    if (n >= 1000) return `${(n/1000).toFixed(1)}K`
+    return String(n)
+  }
+
+  const dotCount = PHASES.length - 2 // exclude flash + done
+  const activeDot = Math.max(0, phaseIdx - 1)
+
+  return (
+    <>
+      <button className="skip-btn" onClick={skip} aria-label="Skip reveal">SKIP</button>
+
+      {/* Progress dots */}
+      <div className="reveal-progress" role="progressbar" aria-label={`Reveal phase ${phaseIdx + 1}`}>
+        {Array.from({ length: dotCount }, (_, i) => (
+          <div key={i} className={`reveal-dot ${i === activeDot ? 'active' : ''}`}/>
+        ))}
+      </div>
+
+      <div className="reveal-screen" style={{ background: 'var(--bg)' }}>
+        {/* Radial burst rings on phase entry */}
+        <div key={`burst-${key}`} className="reveal-burst-ring"
+          style={{ background: `radial-gradient(circle, ${clr}, transparent)` }}
+        />
+
+        {/* Flash phase */}
+        {phase === 'flash' && (
+          <div key="flash" className="reveal-flash" style={{ background: clr }}/>
+        )}
+
+        {/* NAME phase */}
+        {phase === 'name' && (
+          <div key="name" className="phase-name-container">
+            <div className="phase-name-label">Bundesliga Wrapped 2024/25</div>
+            <div className="phase-name-text">{scrambled || userName.toUpperCase()}</div>
+            <div style={{
+              fontFamily: 'var(--font-body)',
+              fontSize: 13,
+              color: 'rgba(255,255,255,0.4)',
+              marginTop: 20,
+              letterSpacing: '2px',
+              textTransform: 'uppercase',
+              animation: 'labelUp 0.5s 1.4s ease-out both',
+              opacity: 0,
+            }}>
+              Your season story is loading…
+            </div>
+            <Particles color={clr} />
+          </div>
+        )}
+
+        {/* ARCHETYPE phase */}
+        {phase === 'archetype' && (
+          <div key="archetype" className="phase-archetype-container">
+            <div className="phase-archetype-badge">{club.short_name}</div>
+            <div style={{
+              fontFamily: 'var(--font-body)',
+              fontSize: 11,
+              letterSpacing: '3px',
+              textTransform: 'uppercase',
+              color: 'var(--text-muted)',
+              marginBottom: 10,
+              animation: 'labelUp 0.4s 0.15s ease-out both',
+              opacity: 0,
+            }}>You are a</div>
+            <div className="phase-archetype-title">{archetype.toUpperCase()}</div>
+            <div style={{
+              fontFamily: 'var(--font-body)',
+              fontSize: 14,
+              color: 'var(--text-muted)',
+              marginTop: 20,
+              fontWeight: 300,
+              lineHeight: 1.6,
+              maxWidth: 320,
+              textAlign: 'center',
+              animation: 'labelUp 0.5s 0.7s ease-out both',
+              opacity: 0,
+            }}>
+              {wrapped_card?.greeting || `Welcome back, ${userName}.`}
+            </div>
+            {country && (
+              <div style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.25)',
+                marginTop: 12,
+                letterSpacing: '1.5px',
+                textTransform: 'uppercase',
+                animation: 'labelUp 0.4s 1.1s ease-out both',
+                opacity: 0,
+              }}>
+                {country}{localeClass && localeClass !== 'Heimfan' ? ` · ${localeClass}` : ''}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STAT phases (0, 1, 2) */}
+        {['stat0', 'stat1', 'stat2'].map((s, i) => phase === s && (
+          <div key={s} className="phase-stat-container">
+            <div className="phase-stat-label">{stats[i].label}</div>
+            <span className="phase-stat-number" style={{ color: clr }}>
+              {fmtNum(statValues[i])}
+            </span>
+            <div className="phase-stat-sublabel">{stats[i].sublabel}</div>
+            <div className="phase-stat-context">{stats[i].context}</div>
+            {/* Favourite video callout on KPI 1 */}
+            {i === 0 && favVideo && (
+              <div style={{
+                marginTop: 16,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 10,
+                padding: '10px 16px',
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                maxWidth: 280,
+                textAlign: 'center',
+                animation: 'labelUp 0.4s 1.6s ease-out both',
+                opacity: 0,
+              }}>
+                🎬 Most watched: <span style={{ color: 'var(--text)' }}>{favVideo}</span>
+              </div>
+            )}
+            <Particles color={clr} />
+          </div>
+        ))}
+
+        {/* GLOBAL RANK phase */}
+        {phase === 'global' && (
+          <div key="global" className="phase-stat-container">
+            <div className="phase-stat-label">
+              {totalFans > 0 ? `Your rank among ${totalFans.toLocaleString()} ${club.short_name} fans` : 'Your fan rank'}
+            </div>
+            <span className="phase-stat-number" style={{ color: clr }}>
+              #{globalCounter}
+            </span>
+            <div className="phase-stat-sublabel">
+              {globalRank >= 80 ? 'Elite — top of your club' : globalRank >= 50 ? 'Above average — well above most' : globalRank >= 25 ? 'Solid fan — showing up counts' : 'Every match matters'}
+            </div>
+            <div className="phase-stat-context">
+              {peakMonth ? `Peak month: ${fmtMonth(peakMonth)} · ${peakMonthRange}` : ''}
+            </div>
+            {supermatchContext && (
+              <div style={{
+                marginTop: 14,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 10,
+                padding: '10px 16px',
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                maxWidth: 280,
+                textAlign: 'center',
+                animation: 'labelUp 0.4s 1.8s ease-out both',
+                opacity: 0,
+              }}>
+                🗓 {supermatchContext}
+              </div>
+            )}
+            {maxStreak > 1 && (
+              <div style={{
+                marginTop: 10,
+                fontSize: 12,
+                color: 'rgba(255,255,255,0.35)',
+                animation: 'labelUp 0.4s 2.2s ease-out both',
+                opacity: 0,
+              }}>
+                🔥 {maxStreak} month streak {streakPeriod ? `(${streakPeriod})` : ''}
+              </div>
+            )}
+            <Particles color={clr} />
+          </div>
+        )}
+
+        {/* PERSONA phase */}
+        {phase === 'persona' && (
+          <div key="persona" className="phase-archetype-container">
+            {matchCenterPersona && (
+              <div className="phase-archetype-badge" style={{ marginBottom: 12 }}>
+                {matchCenterPersona}
+              </div>
+            )}
+            <div style={{
+              fontFamily: 'var(--font-body)',
+              fontSize: 11,
+              letterSpacing: '3px',
+              textTransform: 'uppercase',
+              color: 'var(--text-muted)',
+              marginBottom: 6,
+              animation: 'labelUp 0.4s 0.1s ease-out both',
+              opacity: 0,
+            }}>Your content type</div>
+            <div className="phase-archetype-title" style={{fontSize: 'clamp(32px,8vw,48px)'}}>
+              {contentDietType ? contentDietType.toUpperCase() : archetype.toUpperCase()}
+            </div>
+            {loyaltyClass && (
+              <div style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: 13,
+                color: 'var(--text-muted)',
+                marginTop: 18,
+                fontWeight: 300,
+                lineHeight: 1.6,
+                maxWidth: 300,
+                textAlign: 'center',
+                animation: 'labelUp 0.5s 0.7s ease-out both',
+                opacity: 0,
+              }}>
+                {loyaltyClass}{localeClass && localeClass !== 'Heimfan' ? ` · ${localeClass}` : ''}
+              </div>
+            )}
+            {wrapped_card?.fan_identity_statement && (
+              <div style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: 12,
+                color: 'rgba(255,255,255,0.35)',
+                marginTop: 14,
+                fontWeight: 300,
+                lineHeight: 1.6,
+                maxWidth: 300,
+                textAlign: 'center',
+                fontStyle: 'italic',
+                animation: 'labelUp 0.5s 1.1s ease-out both',
+                opacity: 0,
+              }}>
+                "{wrapped_card.fan_identity_statement}"
+              </div>
+            )}
+            <Particles color={clr} />
+          </div>
+        )}
+
+        {/* MVP phase */}
+        {phase === 'mvp' && (
+          <div key="mvp" className="phase-mvp-container">
+            <div className="phase-mvp-label">⚽ Data-Declared Season MVP · 166 dimensions</div>
+            <div className="phase-mvp-name">{mvpName.toUpperCase()}</div>
+            <div className="phase-mvp-sub">{scout_report?.season_label || 'Outstanding Season'}</div>
+            {mvpScore && (
+              <div className="phase-mvp-score">Impact Score: {Number(mvpScore).toFixed(1)}</div>
+            )}
+            {scout_report?.scout_report && (
+              <div style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: 13,
+                color: 'var(--text-muted)',
+                fontWeight: 300,
+                lineHeight: 1.65,
+                maxWidth: 320,
+                textAlign: 'center',
+                marginTop: 16,
+                animation: 'goldSettle 0.6s 1.8s ease-out both',
+                opacity: 0,
+              }}>
+                {scout_report.scout_report}
+              </div>
+            )}
+            <Particles color="#f0b429" />
+          </div>
+        )}
+
+        {/* Wipe transition bar */}
+        {phase !== 'flash' && (
+          <div key={`wipe-${key}`} className="phase-wipe" style={{ background: clr }}/>
+        )}
+      </div>
+    </>
+  )
+}
+
+// ── UTILS ──
+const hexToRgb = hex => {
+  const h = (hex || '').replace('#', '')
+  if (h.length < 6) return '212,0,26'
+  return `${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)}`
+}
+
+const safeColor = color => {
+  if (!color) return null
+  const c = color.replace(/^#+/, '#')
+  if (c === '#FFFFFF' || c === '#ffffff' || c === '#fff') return null
+  return c
+}
+
+const applyClubTheme = color => {
+  const c = safeColor(color)
+  if (!c) return
+  document.documentElement.style.setProperty('--club-color', c)
+  document.documentElement.style.setProperty('--club-color-raw', c)
+  document.documentElement.style.setProperty('--club-glow', `rgba(${hexToRgb(c)},0.3)`)
+}
+
+const resetTheme = () => {
+  document.documentElement.style.removeProperty('--club-color')
+  document.documentElement.style.removeProperty('--club-color-raw')
+  document.documentElement.style.removeProperty('--club-glow')
+}
+
+const fmt = n => {
+  if (!n && n !== 0) return '0'
+  return n > 999 ? `${(n/1000).toFixed(1)}K` : String(n)
+}
+
+// ── SCREEN 1: CLUB SELECT ──
+function ClubSelectScreen({ onSelect }) {
+  const [clubs, setClubs] = useState([])
+  const [selected, setSelected] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    fetchClubs()
+      .then(d => { setClubs(d.clubs || []); setLoading(false) })
+      .catch(() => { setError('Could not load clubs. Check connection.'); setLoading(false) })
+  }, [])
+
+  const handleSelect = club => {
+    setSelected(club.club_id)
+    applyClubTheme(club.primary_color)
+  }
+
+  return (
+    <div className="screen">
+      <div className="hero-title">
+        YOUR<br/>
+        <span style={{color:'var(--accent)'}}>SEASON</span><br/>
+        WRAPPED
+      </div>
+      <div className="hero-sub">2024/25 Bundesliga — Personalized for you</div>
+      {error && <div className="error-box">{error}</div>}
+      {loading && <div style={{color:'var(--text-muted)',fontSize:14}}>Loading clubs...</div>}
+      {!loading && !error && (
+        <>
+          <div style={{fontSize:11,letterSpacing:'2px',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:12}}>
+            Select Your Club
+          </div>
+          <div className="club-scroll">
+            <div className="club-grid">
+              {clubs.map(club => {
+                const clr = safeColor(club.primary_color) || 'var(--accent)'
+                return (
+                  <div
+                    key={club.club_id}
+                    className={`club-card ${selected === club.club_id ? 'selected' : ''}`}
+                    style={{'--club-color': clr, '--club-glow': `rgba(${hexToRgb(clr)},0.3)`}}
+                    onClick={() => handleSelect(club)}
+                  >
+                    <span className="club-code" style={{color: clr}}>{club.three_letter_code}</span>
+                    <span className="club-name-small">{club.short_name}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          <div style={{marginTop:16}}>
+            <button
+              className="btn btn-primary"
+              disabled={!selected}
+              onClick={() => onSelect(clubs.find(c => c.club_id === selected))}
+            >
+              CONTINUE
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── SCREEN 2: USER INPUT ──
+function UserInputScreen({ club, onSubmit, onBack }) {
+  const [name, setName] = useState('')
+  const clr = safeColor(club.primary_color) || 'var(--accent)'
+
+  return (
+    <div className="screen">
+      <button className="back-btn" onClick={onBack} style={{marginBottom:24}}>← Back</button>
+      <div style={{marginBottom:28}}>
+        <div style={{fontSize:11,letterSpacing:'2px',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6}}>
+          Your Club
+        </div>
+        <div style={{fontFamily:'var(--font-display)',fontSize:36,letterSpacing:'2px',color:clr}}>
+          {club.short_name}
+        </div>
+      </div>
+      <div className="input-group">
+        <label className="input-label" htmlFor="user-name">Your Name</label>
+        <input
+          id="user-name"
+          className="input-field"
+          type="text"
+          placeholder="Enter your name"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          maxLength={30}
+        />
+      </div>
+      <button
+        className="btn btn-primary"
+        disabled={!name.trim()}
+        onClick={() => onSubmit({ name: name.trim() })}
+        style={{marginTop:16}}
+      >
+        GENERATE MY WRAPPED
+      </button>
+    </div>
+  )
+}
+
+// ── LOADING SCREEN ──
+function LoadingScreen() {
+  const messages = [
+    'Scanning 34 matchdays…',
+    'Computing Impact Scores…',
+    'Consulting the data…',
+    'Crafting your narrative…',
+  ]
+  const [msgIdx, setMsgIdx] = useState(0)
+  useEffect(() => {
+    const iv = setInterval(() => setMsgIdx(i => (i+1) % messages.length), 1800)
+    return () => clearInterval(iv)
+  }, [])
+  return (
+    <div className="loading-screen">
+      <div className="spinner" style={{borderTopColor:'var(--club-color,var(--accent))'}}/>
+      <div className="loading-title">
+        BUILDING<br/>
+        <span style={{color:'var(--club-color,var(--accent))'}}>YOUR</span><br/>
+        WRAPPED
+      </div>
+      <div className="loading-sub">{messages[msgIdx]}</div>
+    </div>
+  )
+}
+
+// ── CONFETTI ──
+function Confetti({ color }) {
+  const pieces = Array.from({ length: 80 }, (_, i) => {
+    const colors = [color, '#f0b429', '#ffffff', '#d4001a', color + 'cc']
+    const c = colors[i % colors.length]
+    const left = Math.random() * 100
+    const delay = Math.random() * 2.5
+    const duration = 2.5 + Math.random() * 2
+    const width = 6 + Math.random() * 8
+    const height = 4 + Math.random() * 6
+    const rotate = Math.random() * 360
+    return { c, left, delay, duration, width, height, rotate }
+  })
+  return (
+    <div className="confetti-container">
+      {pieces.map((p, i) => (
+        <div key={i} className="confetti-piece" style={{
+          left: `${p.left}%`,
+          width: p.width,
+          height: p.height,
+          background: p.c,
+          animationDelay: `${p.delay}s`,
+          animationDuration: `${p.duration}s`,
+          transform: `rotate(${p.rotate}deg)`,
+        }}/>
+      ))}
+    </div>
+  )
+}
+
+// ── FAN TIER helper ──
+function getFanTier(percentile) {
+  if (percentile >= 90) return { tierLabel: 'Elite Fan',     color: 'var(--gold)' }
+  if (percentile >= 70) return { tierLabel: 'Dedicated Fan', color: 'var(--club-color, var(--accent))' }
+  if (percentile >= 40) return { tierLabel: 'Regular Fan',   color: 'var(--text)' }
+  return                        { tierLabel: 'Casual Fan',   color: 'var(--text-muted)' }
+}
+
+// ── SCREEN 3: WRAPPED RESULT ──
+function WrappedScreen({ data, club, onManagerMode, onReset, onCinematic }) {
+  const { profile, mvp_analysis, scout_report, wrapped_card } = data
+  const clr = safeColor(club.primary_color) || '#d4001a'
+  const [showConfetti, setShowConfetti] = useState(true)
+  const videoRef = useRef(null)
+
+  useEffect(() => { applyClubTheme(clr) }, [clr])
+  useEffect(() => {
+    const t = setTimeout(() => setShowConfetti(false), 4000)
+    return () => clearTimeout(t)
+  }, [])
+
+  const videoUrl = profile?.video_url
+  const favVideoTitle = profile?.favorite_video
+
+  // KPI fields
+  const engScore           = profile?.engagement_score ?? 0
+  const fanCount           = profile?.fan_count ?? 0
+  const globalRankPos      = profile?.global_rank_position ?? 0
+  const globalRank         = profile?.global_rank ?? 0
+  const countryRank        = profile?.country_rank ?? 0
+  const countryClusterSize = profile?.country_cluster_size ?? 0
+  const ageRank            = profile?.age_rank ?? 0
+  const ageClusterSize     = profile?.age_cluster_size ?? 0
+  const ageGroup           = profile?.age_group || ''
+  const matchCenterPersona = profile?.match_center_persona || ''
+  const contentDietType    = profile?.content_diet_type || ''
+  const arcShape           = profile?.arc_shape || ''
+  const loyaltyClass       = profile?.loyalty_class || ''
+  const tickerTotal        = profile?.ticker_total ?? 0
+  const statsTotal         = profile?.stats_total ?? 0
+  const lineupsTotal       = profile?.lineups_total ?? 0
+  const completionist      = profile?.completionist || false
+  const contentBalance     = profile?.content_balance_type || ''
+  const peakMonth          = profile?.peak_month || ''
+  const peakMonthRange     = profile?.peak_month_matchday_range || ''
+  const maxStreak          = profile?.max_streak ?? 0
+  const streakPeriod       = profile?.streak_period || ''
+  const streakContext      = profile?.streak_context || ''
+  const localeClass        = profile?.locale_class || ''
+  const isInternational    = profile?.is_international || false
+  const langCommunitySize  = profile?.language_community_size ?? 0
+  const isRareLocale       = profile?.is_rare_locale || false
+  const supermatchMonth    = profile?.supermatch_month || ''
+  const supermatchContext  = profile?.supermatch_context || ''
+  const isSameAsPeak       = profile?.is_same_as_peak || false
+  const tablePersona       = profile?.table_persona || ''
+  const planningStyle      = profile?.planning_style || ''
+  const squadInterest      = profile?.squad_interest || ''
+  const videoTitle         = profile?.video_title || favVideoTitle
+  const isPlayedClip       = profile?.is_played_clip || false
+
+  const { tierLabel, color: tierColor } = getFanTier(engScore)
+  // Use club_rank_position if backend has it (after redeployment).
+  // Fallback: derive from fan_percentile + fan_count — always available.
+  // rank ≈ fanCount × (1 − percentile/100), clamped to [1, fanCount]
+  const derivedRank = fanCount > 0 && engScore > 0
+    ? Math.max(1, Math.round(fanCount * (1 - engScore / 100)))
+    : 0
+  const displayRankPos   = profile?.club_rank_position || derivedRank
+  const displayRankTotal = fanCount  // rank is within the club
+
+  const fmtMonth = (str) => {
+    if (!str) return ''
+    try { return new Date(str).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) }
+    catch { return str.slice(0, 7) }
+  }
+
+  return (
+    <div className="wrapped-screen">
+      {showConfetti && <Confetti color={clr} />}
+
+      {/* HERO */}
+      <div className="wrapped-hero" style={{'--club-color-raw': clr}}>
+        <div className="wrapped-season">Bundesliga 2024/25 · Season Wrapped</div>
+        <div className="wrapped-name">{profile.user_name || 'Manager'}</div>
+        <div className="wrapped-archetype">{profile.archetype || 'Football Fan'} · {club.short_name}</div>
+      </div>
+
+      <div className="wrapped-body">
+
+        {/* VIDEO CARD — most-watched clip */}
+        {videoUrl && (
+          <div className="video-card">
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              autoPlay
+              muted
+              loop
+              playsInline
+              onError={() => {}}
+            />
+            <div className="video-card-label">
+              🎬 {favVideoTitle || 'Your most watched'}
+            </div>
+          </div>
+        )}
+
+        {/* GREETING CARD */}
+        <div className="wrapped-card-physical">
+          <span className="card-icon">👋</span>
+          <span className="card-label">Your Season</span>
+          <div className="card-text" style={{fontSize:16,fontWeight:400}}>{wrapped_card.greeting}</div>
+        </div>
+
+        {/* STATS ROW — Fan Score with tier + Club Rank + Active Months */}
+        <div className="stat-row">
+          <div className="stat-box">
+            <span className="stat-value" style={{color: tierColor}}>{engScore}</span>
+            <span className="stat-label" style={{fontSize:9}}>{tierLabel}</span>
+            <span className="stat-label" style={{marginTop:2}}>Fan Score</span>
+          </div>
+          <div className="stat-box">
+            <span className="stat-value" style={{color:clr}}>
+              {displayRankPos > 0 ? `#${displayRankPos}` : '—'}
+            </span>
+            <span className="stat-label" style={{fontSize:9}}>of {displayRankTotal > 0 ? displayRankTotal.toLocaleString() : '?'}</span>
+            <span className="stat-label" style={{marginTop:2}}>Club Rank</span>
+          </div>
+          <div className="stat-box">
+            <span className="stat-value" style={{color:clr}}>{fmt(profile.active_months || 0)}</span>
+            <span className="stat-label">Active Months</span>
+          </div>
+        </div>
+
+        {/* CONTENT ROW — Videos · Stories · Articles */}
+        <div className="stat-row" style={{marginBottom:12}}>
+          <div className="stat-box">
+            <span className="stat-value" style={{color:clr,fontSize:22}}>{fmt(profile.total_videos || 0)}</span>
+            <span className="stat-label">Videos</span>
+          </div>
+          <div className="stat-box">
+            <span className="stat-value" style={{color:clr,fontSize:22}}>{fmt(profile.total_stories || 0)}</span>
+            <span className="stat-label">Stories</span>
+          </div>
+          <div className="stat-box">
+            <span className="stat-value" style={{color:clr,fontSize:22}}>{fmt(profile.total_articles || 0)}</span>
+            <span className="stat-label">Articles</span>
+          </div>
+        </div>
+
+        {/* STORY CARD */}
+        <div className="wrapped-card-physical">
+          <span className="card-icon">📖</span>
+          <span className="card-label">Story</span>
+          <div className="card-text">{wrapped_card.season_story}</div>
+        </div>
+
+        {/* FAN STAT CARD */}
+        <div className="wrapped-card-physical">
+          <span className="card-icon">📊</span>
+          <span className="card-label">Your Fan Stat</span>
+          <div className="card-text">{wrapped_card.fan_stat}</div>
+        </div>
+
+        {/* HOW YOU FOLLOW FOOTBALL CARD */}
+        <div className="wrapped-card-physical">
+          <span className="card-icon">⚙️</span>
+          <span className="card-label">How You Follow Football</span>
+          <div className="card-text">{wrapped_card.tactical_identity}</div>
+        </div>
+
+        {/* MATCH CENTER IDENTITY CARD */}
+        {matchCenterPersona && (
+          <div className="wrapped-card-physical">
+            <span className="card-icon">📡</span>
+            <span className="card-label">Match Center Persona</span>
+            <div className="card-text" style={{fontFamily:'var(--font-display)',fontSize:22,letterSpacing:'1px',marginBottom:8}}>
+              {matchCenterPersona}
+            </div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:8}}>
+              {[['Ticker',tickerTotal],['Stats',statsTotal],['Lineups',lineupsTotal]].map(([label, val]) => (
+                <div key={label} style={{background:'rgba(255,255,255,0.05)',borderRadius:8,padding:'6px 12px',fontSize:11,color:'var(--text-muted)'}}>
+                  {label}: <span style={{color:'var(--text)'}}>{val}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* CONTENT DIET CARD */}
+        {contentDietType && (
+          <div className="wrapped-card-physical">
+            <span className="card-icon">🎬</span>
+            <span className="card-label">Content Diet{completionist ? ' · Completionist' : ''}</span>
+            <div className="card-text" style={{fontFamily:'var(--font-display)',fontSize:22,letterSpacing:'1px',marginBottom:6}}>
+              {contentDietType}
+            </div>
+            {contentBalance && (
+              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:4}}>
+                Balance: {contentBalance}{completionist ? ' — you consumed all content types' : ''}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SEASON ARC + LOYALTY CARD */}
+        {arcShape && (
+          <div className="wrapped-card-physical">
+            <span className="card-icon">📈</span>
+            <span className="card-label">Season Arc</span>
+            <div className="card-text" style={{fontFamily:'var(--font-display)',fontSize:22,letterSpacing:'1px',marginBottom:6}}>
+              {arcShape}
+            </div>
+            {loyaltyClass && (
+              <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:6}}>
+                Loyalty class: <span style={{color:'var(--text)'}}>{loyaltyClass}</span>
+              </div>
+            )}
+            {maxStreak > 0 && (
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>
+                🔥 {maxStreak}-month streak{streakPeriod ? ` (${streakPeriod})` : ''}{streakContext ? ` · ${streakContext}` : ''}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* RANKINGS CARD — club rank + country + age */}
+        {(countryRank > 0 || ageRank > 0 || displayRankPos > 0) && (
+          <div className="wrapped-card-physical">
+            <span className="card-icon">🌍</span>
+            <span className="card-label">Community Rankings</span>
+            <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:4}}>
+              {displayRankPos > 0 && displayRankTotal > 0 && (
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:13,color:'var(--text-muted)'}}>
+                    Among {club.short_name} fans
+                  </span>
+                  <span style={{fontFamily:'var(--font-display)',fontSize:18,color:clr}}>
+                    #{displayRankPos} <span style={{fontSize:11,color:'var(--text-muted)',fontFamily:'var(--font-body)'}}>of {displayRankTotal.toLocaleString()}</span>
+                  </span>
+                </div>
+              )}
+              {countryRank > 0 && countryClusterSize > 0 && (
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:13,color:'var(--text-muted)'}}>
+                    {isInternational ? '🌐 Global fan' : '🇩🇪 Local fan'}{profile?.country ? ` · ${profile.country}` : ''}
+                  </span>
+                  <span style={{fontFamily:'var(--font-display)',fontSize:18,color:clr}}>
+                    {countryRank}/99 <span style={{fontSize:11,color:'var(--text-muted)',fontFamily:'var(--font-body)'}}>({countryClusterSize} fans)</span>
+                  </span>
+                </div>
+              )}
+              {ageRank > 0 && ageClusterSize > 0 && ageGroup && (
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:13,color:'var(--text-muted)'}}>Age group · {ageGroup}</span>
+                  <span style={{fontFamily:'var(--font-display)',fontSize:18,color:clr}}>
+                    {ageRank}/99 <span style={{fontSize:11,color:'var(--text-muted)',fontFamily:'var(--font-body)'}}>({ageClusterSize} fans)</span>
+                  </span>
+                </div>
+              )}
+              {isRareLocale && (
+                <div style={{fontSize:12,color:'var(--gold)',marginTop:2}}>
+                  ⭐ Rare Supporter — one of fewer than 10 fans in your locale
+                </div>
+              )}
+              {localeClass && localeClass !== 'Heimfan' && !isRareLocale && (
+                <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{localeClass}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* PEAK MONTH CARD */}
+        {peakMonth && (
+          <div className="wrapped-card-physical">
+            <span className="card-icon">🗓</span>
+            <span className="card-label">Your Bundesliga Month</span>
+            <div className="card-text" style={{fontFamily:'var(--font-display)',fontSize:22,letterSpacing:'1px',marginBottom:6}}>
+              {(() => { try { return new Date(peakMonth).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) } catch { return peakMonth.slice(0,7) } })()}
+            </div>
+            {peakMonthRange && (
+              <div style={{fontSize:12,color:'var(--text-muted)',marginBottom:4}}>{peakMonthRange}</div>
+            )}
+            {supermatchContext && supermatchMonth && (
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>
+                {isSameAsPeak ? '🎯 ' : ''}{supermatchContext}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* FAN BEHAVIOUR SIGNALS CARD */}
+        {(tablePersona || planningStyle || squadInterest) && (
+          <div className="wrapped-card-physical">
+            <span className="card-icon">🧬</span>
+            <span className="card-label">Fan DNA</span>
+            <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:4}}>
+              {tablePersona && (
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span style={{fontSize:12,color:'var(--text-muted)'}}>Standings obsession</span>
+                  <span style={{fontSize:12,color:'var(--text)'}}>{tablePersona}</span>
+                </div>
+              )}
+              {planningStyle && (
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span style={{fontSize:12,color:'var(--text-muted)'}}>App style</span>
+                  <span style={{fontSize:12,color:'var(--text)'}}>{planningStyle}</span>
+                </div>
+              )}
+              {squadInterest && (
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span style={{fontSize:12,color:'var(--text-muted)'}}>Squad focus</span>
+                  <span style={{fontSize:12,color:'var(--text)'}}>{squadInterest}</span>
+                </div>
+              )}
+            </div>
+            {wrapped_card?.fan_dna_statement && (
+              <div style={{marginTop:12,fontSize:12,color:'rgba(255,255,255,0.4)',fontStyle:'italic',lineHeight:1.6}}>
+                "{wrapped_card.fan_dna_statement}"
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* FAN IDENTITY STATEMENT CARD */}
+        {wrapped_card?.fan_identity_statement && (
+          <div className="wrapped-card-physical" style={{background:`linear-gradient(135deg, rgba(${hexToRgb(clr)},0.08) 0%, var(--surface) 100%)`}}>
+            <span className="card-icon">🪪</span>
+            <span className="card-label">Your Fan Identity</span>
+            <div className="card-text" style={{fontSize:15,lineHeight:1.7,fontStyle:'italic'}}>
+              "{wrapped_card.fan_identity_statement}"
+            </div>
+          </div>
+        )}
+
+        {/* VIDEO TITLE (non-Bayern fans with a title but no clip) */}
+        {!videoUrl && videoTitle && (
+          <div className="wrapped-card-physical">
+            <span className="card-icon">🎬</span>
+            <span className="card-label">Most watched</span>
+            <div className="card-text">{videoTitle}</div>
+          </div>
+        )}
+
+        {/* VERDICT CARD */}
+        <div className="wrapped-card-physical" style={{background:`linear-gradient(135deg, rgba(${hexToRgb(clr)},0.1) 0%, var(--surface) 100%)`}}>
+          <span className="card-icon">🏆</span>
+          <span className="card-label">Season Verdict</span>
+          <div className="card-verdict">{wrapped_card.season_verdict}</div>
+        </div>
+
+        {/* MVP */}
+        <div className="section-title">Season MVP</div>
+        <div className="mvp-banner">
+          <span className="mvp-label">⚽ Data-Declared MVP — 166 Statistical Dimensions</span>
+          <div className="mvp-name">{mvp_analysis?.mvp || (mvp_analysis?.players?.[0]?.name) || '—'}</div>
+          <div className="mvp-score">{scout_report?.season_label || 'Top Performer'}</div>
+          <div className="mvp-report">{scout_report?.scout_report || ''}</div>
+        </div>
+
+        {/* SHARE CARD */}
+        <div className="section-title">Share</div>
+        <div className="wrapped-card-physical share-card" style={{'--club-color-raw': clr, border: `1px solid ${clr}40`}}>
+          <span className="card-icon">📤</span>
+          <div className="share-text">{wrapped_card.share_text}</div>
+          <div className="share-tag">#BundesligaWrapped · #{club.three_letter_code}</div>
+        </div>
+
+        {/* FOOTER NOTE */}
+        <div style={{background:'rgba(255,255,255,0.02)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',fontSize:11,color:'var(--text-muted)',lineHeight:1.6,marginBottom:10}}>
+          ⚡ Auto-generated from real DFL data · Works for all 18 Bundesliga clubs · Powered by Amazon Bedrock
+        </div>
+
+        <button className="btn btn-primary" onClick={onManagerMode} style={{marginBottom:8}}>
+          TRY MANAGER MODE →
+        </button>
+        <button className="btn btn-ghost" style={{marginBottom:8, borderColor: clr, color: clr}}
+                onClick={onCinematic}>
+          🎬 CINEMATIC STORY MODE
+        </button>
+        <button className="btn btn-ghost" onClick={onReset}>
+          TRY ANOTHER CLUB
         </button>
       </div>
     </div>
   )
 }
 
-// Club Selection Page Component
-function ClubSelectionPage({ onClubSelected }) {
-  return (
-    <div className="p-8">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-2 text-gray-900">Select Your Club</h1>
-        <p className="text-gray-600 mb-8">Choose your favorite Bundesliga club to begin</p>
-        <ClubSelector onSelectClub={onClubSelected} />
-      </div>
-    </div>
-  )
-}
-
-// Judge Input Form Page Component
-function InputPage({ selectedClub, onClubSelect, userName, setUserName, tacticalStyle, setTacticalStyle, onGenerateWrapped, loading }) {
-  return (
-    <div className="p-8">
-      <JudgeInputForm
-        selectedClub={selectedClub}
-        userName={userName}
-        onUserNameChange={setUserName}
-        tacticalStyle={tacticalStyle}
-        onTacticalStyleChange={setTacticalStyle}
-        onGenerateWrapped={onGenerateWrapped}
-        loading={loading}
-        onChangeClub={() => onClubSelect(null)}
-      />
-    </div>
-  )
-}
-
-// Wrapped Card Page Component
-function WrappedPage({ wrappedData, selectedClub, onNext, revealSkipped, onSkipReveal }) {
-  if (!wrappedData || !selectedClub) {
-    return (
-      <div className="p-8">
-        <p className="text-gray-600">No wrapped data available</p>
-      </div>
-    )
-  }
-
-  // If reveal hasn't been skipped, show the animated reveal
-  if (!revealSkipped) {
-    return (
-      <WrappedCardReveal
-        wrappedData={wrappedData}
-        clubColor={selectedClub.primary_color}
-        onRevealComplete={onNext}
-        onSkip={onSkipReveal}
-      />
-    )
-  }
-
-  // After reveal completes or is skipped, show static card
-  return (
-    <WrappedCard
-      wrappedData={wrappedData}
-      clubColor={selectedClub.primary_color}
-      onNext={onNext}
-    />
-  )
-}
-
-// MVP Leaderboard Page Component
-function MVPPage({ mvpData, wrappedData, onNext }) {
-  if (!mvpData) {
-    return (
-      <div className="p-8">
-        <p className="text-gray-600">No MVP data available</p>
-      </div>
-    )
-  }
-
-  const { players } = mvpData;
-  
-  // Get scout reports from wrappedData if available
-  const scoutReports = wrappedData?.scout_report || {};
-
-  return (
-    <div className="p-8">
-      <div className="max-w-6xl mx-auto">
-        <h2 className="text-3xl font-bold mb-2">Season MVP — Data-Driven Ranking</h2>
-        <p className="text-gray-600 mb-8">Top 3 Bayern players by Impact Score</p>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {players && players.map((player, index) => {
-            // Get scout report for this player (index 0, 1, 2)
-            const playerScoutReport = scoutReports[index] || {
-              headline: 'Outstanding Season',
-              scout_report: 'A standout performer this season. Consistent excellence across all metrics. A key player in Bayern\'s success.',
-              season_label: 'Top Performer',
-            };
-
-            return (
-              <MVPCard
-                key={index}
-                rank={index + 1}
-                player={player}
-                scoutReport={playerScoutReport}
-              />
-            );
-          })}
-        </div>
-
-        {/* Manager Mode Button */}
-        <div className="mt-12 text-center">
-          <button
-            onClick={onNext}
-            className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-            aria-label="Try Manager Mode - Tactical Substitution Simulator"
-          >
-            Try Manager Mode →
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Substitution Simulator Page Component
-function SubstitutionPage({
-  wrappedData,
-  selectedMatch,
-  matchData,
-  selectedStarter,
-  selectedBench,
-  analysisResult,
-  onSelectMatch,
-  onSelectStarter,
-  onSelectBench,
-  onAnalyzeSubstitution,
-  onTryAnother,
-  loading,
-}) {
-  // Extract matches from wrappedData if available
-  const matches = wrappedData?.schedule || [];
-
-  // If we have analysis result, show the analysis card
-  if (analysisResult) {
-    return (
-      <div className="p-8">
-        <div className="max-w-4xl mx-auto">
-          <h2 className="text-3xl font-bold mb-2">Tactical Substitution Analysis</h2>
-          <p className="text-gray-600 mb-8">Bedrock-powered analysis of your proposed substitution</p>
-          
-          <TacticalAnalysisCard
-            analysis={analysisResult.analysis}
-            starter={selectedStarter}
-            bench={selectedBench}
-            onTryAnother={onTryAnother}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  // If we have match data, show bench selector
-  if (selectedMatch && matchData) {
-    return (
-      <div className="p-8">
-        <div className="max-w-4xl mx-auto">
-          <h2 className="text-3xl font-bold mb-2">Manager Mode — Tactical Substitution Simulator</h2>
-          <p className="text-gray-600 mb-8">Select a starter to remove and a bench player to bring on</p>
-          
-          <BenchSelector
-            match={matchData}
-            startingXI={matchData.starting_xi || []}
-            bench={matchData.bench || []}
-            selectedStarter={selectedStarter}
-            selectedBench={selectedBench}
-            onSelectStarter={onSelectStarter}
-            onSelectBench={onSelectBench}
-            onAnalyzeSubstitution={onAnalyzeSubstitution}
-            loading={loading}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  // Default: show match picker
-  return (
-    <div className="p-8">
-      <div className="max-w-4xl mx-auto">
-        <h2 className="text-3xl font-bold mb-2">Manager Mode — Tactical Substitution Simulator</h2>
-        <p className="text-gray-600 mb-8">Select a match to explore tactical substitution scenarios</p>
-        
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <MatchPicker
-            matches={matches}
-            onSelectMatch={onSelectMatch}
-            loading={loading}
-          />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function App() {
-  // View state
-  const [currentView, setCurrentView] = useState('landing')
-
-  // User input state
-  const [userName, setUserName] = useState('')
-  const [selectedClub, setSelectedClub] = useState(null)
-  const [tacticalStyle, setTacticalStyle] = useState('High Press')
-
-  // Data state
-  const [wrappedData, setWrappedData] = useState(null)
-  const [mvpData, setMvpData] = useState(null)
+// ── SCREEN 4: MANAGER MODE ──
+function ManagerScreen({ club, wrappedData, onBack }) {
+  const [step, setStep] = useState('match') // match | bench | analysis
+  const [matches, setMatches] = useState([])
+  const [loadingMatches, setLoadingMatches] = useState(true)
   const [selectedMatch, setSelectedMatch] = useState(null)
   const [matchData, setMatchData] = useState(null)
-  const [selectedStarter, setSelectedStarter] = useState(null)
-  const [selectedBench, setSelectedBench] = useState(null)
-  const [analysisResult, setAnalysisResult] = useState(null)
-  const [revealSkipped, setRevealSkipped] = useState(false)
-
-  // UI state
+  const [starter, setStarter] = useState(null)
+  const [bench, setBench] = useState(null)
+  const [analysis, setAnalysis] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  /**
-   * Navigation function: Update current view
-   */
-  const navigateTo = (view) => {
-    setCurrentView(view)
-    setError(null)
-  }
+  const clr = safeColor(club.primary_color) || 'var(--accent)'
 
-  /**
-   * Update selected club and navigate to input form
-   */
-  const handleClubSelected = (club) => {
-    setSelectedClub(club)
-    navigateTo('input')
-  }
-
-  /**
-   * Generate wrapped data by calling API
-   */
-  const generateWrapped = async () => {
-    if (!selectedClub || !userName) {
-      setError('Please select a club and enter your name')
-      return
+  // Load matches from wrapped data schedule or separate endpoint
+  useEffect(() => {
+    const schedule = wrappedData?.schedule || []
+    if (schedule.length > 0) {
+      setMatches(schedule)
+      setLoadingMatches(false)
+    } else {
+      setLoadingMatches(false)
     }
+  }, [wrappedData])
 
-    setLoading(true)
-    setError(null)
-
-    try {
-      // Call fetchWrapped API with user inputs
-      const data = await fetchWrapped(selectedClub.name, userName, tacticalStyle)
-      setWrappedData(data)
-      
-      // Also fetch MVP data for the next view
-      const mvpResponse = await fetchMVP()
-      setMvpData(mvpResponse)
-      
-      navigateTo('wrapped')
-    } catch (err) {
-      setError(err.message || 'Failed to generate wrapped card')
-      console.error('Error generating wrapped:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  /**
-   * Select a match for substitution analysis
-   */
-  const handleSelectMatch = async (match) => {
+  const handleSelectMatch = async match => {
     setSelectedMatch(match)
     setLoading(true)
     setError(null)
-
     try {
-      // Fetch bench players for the selected match
-      // Use Bayern's team ID (assuming it's available from the match data or a constant)
-      const teamId = selectedClub?.club_id || 'DFL-CLU-00000G' // Bayern's ID
-      const substitutionData = await fetchSubstitution(match.match_id, teamId)
-      setMatchData(substitutionData)
-      
-      // Reset starter and bench selections for new match
-      setSelectedStarter(null)
-      setSelectedBench(null)
-      setAnalysisResult(null)
-    } catch (err) {
-      setError(err.message || 'Failed to load match data')
-      console.error('Error loading match data:', err)
-      setSelectedMatch(null)
+      const teamId = club.club_id
+      const data = await fetchSubstitution(match.match_id, teamId)
+      setMatchData(data)
+      setStarter(null)
+      setBench(null)
+      setStep('bench')
+    } catch (e) {
+      setError('Failed to load match data. Try another match.')
     } finally {
       setLoading(false)
     }
   }
 
-  /**
-   * Select a starter player to remove
-   */
-  const handleSelectStarter = (player) => {
-    setSelectedStarter(player)
-  }
-
-  /**
-   * Select a bench player to bring on
-   */
-  const handleSelectBench = (player) => {
-    setSelectedBench(player)
-  }
-
-  /**
-   * Analyze substitution by calling API
-   */
-  const handleAnalyzeSubstitution = async () => {
-    if (!selectedMatch || !selectedStarter || !selectedBench) {
-      setError('Please select a match, starter, and bench player')
-      return
-    }
-
+  const handleAnalyze = async () => {
+    if (!starter || !bench) return
     setLoading(true)
     setError(null)
-
     try {
-      const teamId = selectedClub?.club_id || 'DFL-CLU-00000G' // Bayern's ID
-      const analysisData = await fetchAnalyzeSub(
-        selectedMatch.match_id,
-        teamId,
-        selectedStarter.person_id,
-        selectedBench.person_id
-      )
-      setAnalysisResult(analysisData)
-    } catch (err) {
-      setError(err.message || 'Failed to analyze substitution')
-      console.error('Error analyzing substitution:', err)
+      const teamId = club.club_id
+      const data = await fetchAnalyzeSub(selectedMatch.match_id, teamId, starter.person_id, bench.person_id)
+      setAnalysis(data)
+      setStep('analysis')
+    } catch (e) {
+      setError('Failed to analyze substitution. Try again.')
     } finally {
       setLoading(false)
     }
   }
 
-  /**
-   * Try another match: reset substitution state but stay in substitution view
-   */
   const handleTryAnother = () => {
     setSelectedMatch(null)
     setMatchData(null)
-    setSelectedStarter(null)
-    setSelectedBench(null)
-    setAnalysisResult(null)
+    setStarter(null)
+    setBench(null)
+    setAnalysis(null)
+    setStep('match')
   }
 
-  /**
-   * Handle skip reveal: mark reveal as skipped and show static card
-   */
-  const handleSkipReveal = () => {
-    setRevealSkipped(true)
+  const synergyClass = score => {
+    if (score > 0) return 'positive'
+    if (score < 0) return 'negative'
+    return 'neutral'
   }
 
-  /**
-   * Reset all state to initial values
-   */
-  const resetState = () => {
-    setCurrentView('landing')
-    setUserName('')
-    setSelectedClub(null)
-    setTacticalStyle('High Press')
-    setWrappedData(null)
-    setMvpData(null)
-    setSelectedMatch(null)
-    setMatchData(null)
-    setSelectedStarter(null)
-    setSelectedBench(null)
-    setAnalysisResult(null)
-    setRevealSkipped(false)
-    setLoading(false)
-    setError(null)
+  if (step === 'analysis' && analysis) {
+    const a = analysis.analysis || analysis
+    const score = a.synergy_score ?? 0
+    return (
+      <div className="screen">
+        <button className="back-btn" onClick={handleTryAnother} style={{marginBottom:24}}>← Try Another</button>
+        <div style={{fontFamily:'var(--font-display)',fontSize:13,letterSpacing:'3px',color:'var(--text-muted)',marginBottom:16}}>
+          TACTICAL ANALYSIS
+        </div>
+
+        <div className="synergy-gauge">
+          <div className={`synergy-score ${synergyClass(score)}`}>{score > 0 ? `+${score}` : score}</div>
+          <div>
+            <div style={{fontFamily:'var(--font-display)',fontSize:18,letterSpacing:'1px',marginBottom:4}}>SYNERGY SCORE</div>
+            <div className="synergy-label">{a.manager_rating || 'Decent Move'}</div>
+          </div>
+        </div>
+
+        <div className="narrative-card">
+          <span className="narrative-label" style={{color:clr}}>Verdict</span>
+          <div className="narrative-text">{a.verdict}</div>
+        </div>
+        <div className="narrative-card">
+          <span className="narrative-label" style={{color:'var(--text-muted)'}}>Tactical Risk</span>
+          <div className="narrative-text">{a.risk}</div>
+        </div>
+        {a.real_time_note && (
+          <div className="narrative-card">
+            <span className="narrative-label" style={{color:'var(--text-muted)'}}>Timing</span>
+            <div className="narrative-text">{a.real_time_note}</div>
+          </div>
+        )}
+
+        <div style={{background:'rgba(255,255,255,0.02)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',fontSize:11,color:'var(--text-muted)',marginBottom:16}}>
+          {starter?.name} → {bench?.name}
+        </div>
+
+        <button className="btn btn-ghost" onClick={handleTryAnother}>TRY ANOTHER</button>
+        <button className="btn btn-ghost" onClick={onBack} style={{marginTop:8}}>BACK TO WRAPPED</button>
+      </div>
+    )
   }
 
-  /**
-   * Expose navigation functions to window for console testing
-   */
-  useEffect(() => {
-    window.appControls = {
-      navigateTo,
-      updateSelectedClub: handleClubSelected,
-      generateWrapped,
-      selectMatch: handleSelectMatch,
-      selectStarter: handleSelectStarter,
-      selectBench: handleSelectBench,
-      analyzeSubstitution: handleAnalyzeSubstitution,
-      tryAnother: handleTryAnother,
-      skipReveal: handleSkipReveal,
-      resetState,
-      // State getters for inspection
-      getState: () => ({
-        currentView,
-        userName,
-        selectedClub,
-        tacticalStyle,
-        wrappedData,
-        mvpData,
-        selectedMatch,
-        matchData,
-        selectedStarter,
-        selectedBench,
-        analysisResult,
-        revealSkipped,
-        loading,
-        error
-      })
-    }
-  }, [currentView, userName, selectedClub, tacticalStyle, wrappedData, mvpData, selectedMatch, matchData, selectedStarter, selectedBench, analysisResult, revealSkipped, loading, error])
+  if (step === 'bench' && matchData) {
+    const starters = matchData.starting_xi || matchData.starters || []
+    const benchPlayers = matchData.bench || []
+    return (
+      <div className="screen">
+        <button className="back-btn" onClick={() => setStep('match')} style={{marginBottom:24}}>← Back</button>
+        <div style={{fontFamily:'var(--font-display)',fontSize:13,letterSpacing:'3px',color:'var(--text-muted)',marginBottom:4}}>
+          MANAGER MODE
+        </div>
+        <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:20}}>
+          MD{matchData.match_day || selectedMatch?.match_day} · {matchData.result || ''} · {matchData.formation || ''}
+        </div>
 
-  // Render current view
-  const renderView = () => {
-    switch (currentView) {
-      case 'landing':
-        return <LandingPage onNavigateToInput={() => navigateTo('club-select')} />
-      case 'club-select':
-        return <ClubSelectionPage onClubSelected={handleClubSelected} />
-      case 'input':
-        return (
-          <InputPage
-            selectedClub={selectedClub}
-            onClubSelect={(club) => {
-              setSelectedClub(club)
-              if (!club) navigateTo('club-select')
-            }}
-            userName={userName}
-            setUserName={setUserName}
-            tacticalStyle={tacticalStyle}
-            setTacticalStyle={setTacticalStyle}
-            onGenerateWrapped={generateWrapped}
-            loading={loading}
-          />
-        )
-      case 'wrapped':
-        return <WrappedPage wrappedData={wrappedData} selectedClub={selectedClub} onNext={() => navigateTo('mvp')} revealSkipped={revealSkipped} onSkipReveal={handleSkipReveal} />
-      case 'mvp':
-        return <MVPPage mvpData={mvpData} wrappedData={wrappedData} onNext={() => navigateTo('substitution')} />
-      case 'substitution':
-        return (
-          <SubstitutionPage
-            wrappedData={wrappedData}
-            selectedMatch={selectedMatch}
-            matchData={matchData}
-            selectedStarter={selectedStarter}
-            selectedBench={selectedBench}
-            analysisResult={analysisResult}
-            onSelectMatch={handleSelectMatch}
-            onSelectStarter={handleSelectStarter}
-            onSelectBench={handleSelectBench}
-            onAnalyzeSubstitution={handleAnalyzeSubstitution}
-            onTryAnother={handleTryAnother}
-            loading={loading}
-          />
-        )
-      default:
-        return <LandingPage onNavigateToInput={() => navigateTo('club-select')} />
-    }
-  }
+        {error && <div className="error-box">{error}</div>}
 
-  // Determine if we can show back button
-  const canGoBack = currentView !== 'landing'
-  const getBackView = () => {
-    switch (currentView) {
-      case 'club-select':
-        return 'landing'
-      case 'input':
-        return 'club-select'
-      case 'wrapped':
-        return 'input'
-      case 'mvp':
-        return 'wrapped'
-      case 'substitution':
-        return 'mvp'
-      default:
-        return 'landing'
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header with navigation */}
-      <header className="bg-white shadow sticky top-0 z-40">
-        <nav className="max-w-7xl mx-auto px-4 py-4 flex gap-2 items-center flex-wrap">
-          {/* Back button */}
-          {canGoBack && (
-            <button
-              onClick={() => navigateTo(getBackView())}
-              className="px-4 py-2 rounded font-medium transition-colors bg-gray-200 text-gray-900 hover:bg-gray-300"
-              aria-label="Go back to previous view"
+        <div className="section-title">Starting XI — tap to remove</div>
+        <div className="player-grid" style={{marginBottom:16}}>
+          {starters.map(p => (
+            <div
+              key={p.person_id}
+              className={`player-item ${starter?.person_id === p.person_id ? 'selected-starter' : ''}`}
+              onClick={() => setStarter(starter?.person_id === p.person_id ? null : p)}
             >
-              ← Back
-            </button>
-          )}
-        </nav>
-      </header>
+              <div className="player-number">{p.shirt_number || '—'}</div>
+              <div className="player-name">{p.name}</div>
+              <div className="player-pos">{p.playing_position || ''}</div>
+            </div>
+          ))}
+        </div>
 
-      {/* Error display */}
-      {error && (
-        <Toast
-          message={error}
-          type="error"
-          onDismiss={() => setError(null)}
-        />
-      )}
+        <div className="section-title">Bench — tap to bring on</div>
+        <div className="player-grid" style={{marginBottom:20}}>
+          {benchPlayers.map(p => (
+            <div
+              key={p.person_id}
+              className={`player-item ${bench?.person_id === p.person_id ? 'selected-bench' : ''}`}
+              onClick={() => setBench(bench?.person_id === p.person_id ? null : p)}
+            >
+              <div className="player-number">{p.shirt_number || '—'}</div>
+              <div className="player-name">{p.name}</div>
+              <div className="player-pos">{p.playing_position || ''}</div>
+            </div>
+          ))}
+        </div>
 
-      {/* Loading indicator */}
-      {loading && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <Spinner message="Loading..." />
+        <button
+          className="btn btn-primary"
+          disabled={!starter || !bench || loading}
+          onClick={handleAnalyze}
+        >
+          {loading ? 'ANALYZING…' : 'ANALYZE SUBSTITUTION'}
+        </button>
+      </div>
+    )
+  }
+
+  // step === 'match'
+  return (
+    <div className="screen">
+      <button className="back-btn" onClick={onBack} style={{marginBottom:24}}>← Back to Wrapped</button>
+      <div style={{fontFamily:'var(--font-display)',fontSize:13,letterSpacing:'3px',color:'var(--text-muted)',marginBottom:4}}>
+        MANAGER MODE
+      </div>
+      <div className="hero-title" style={{fontSize:'clamp(36px,9vw,52px)',marginBottom:8}}>
+        PICK A<br/><span style={{color:clr}}>MATCH</span>
+      </div>
+      <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:20}}>
+        Select a 2024/25 match to simulate a substitution
+      </div>
+
+      {error && <div className="error-box">{error}</div>}
+      {loading && <div style={{color:'var(--text-muted)',fontSize:13,marginBottom:12}}>Loading…</div>}
+
+      {loadingMatches && <div style={{color:'var(--text-muted)',fontSize:13}}>Loading matches…</div>}
+
+      {!loadingMatches && matches.length === 0 && (
+        <div style={{color:'var(--text-muted)',fontSize:13,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px'}}>
+          No matches available. Please generate your Wrapped first to load the schedule.
         </div>
       )}
 
-      {/* Main content */}
-      <main className="max-w-7xl mx-auto">
-        {renderView()}
-      </main>
+      {matches.length > 0 && (
+        <div className="match-list">
+          {matches.map(m => (
+            <div
+              key={m.match_id}
+              className={`match-item ${selectedMatch?.match_id === m.match_id ? 'selected' : ''}`}
+              onClick={() => handleSelectMatch(m)}
+            >
+              <div className="match-day">MATCH DAY {m.match_day}</div>
+              <div className="match-teams">{m.home_team} vs {m.guest_team}</div>
+              <div className="match-result">{m.result || ''}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-export default App
+// ── APP ──
+export default function App() {
+  const [screen, setScreen] = useState('club')
+  const [selectedClub, setSelectedClub] = useState(null)
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const steps = { club: '1 / 3', input: '2 / 3', loading: '', reveal: '', result: '3 / 3', manager: '', presentation: '✦' }
+
+  const handleClubSelect = club => {
+    setSelectedClub(club)
+    setScreen('input')
+  }
+
+  const handleSubmit = async ({ name }) => {
+    setLoading(true)
+    setError(null)
+    setScreen('loading')
+    try {
+      // tactical_style removed — not derived from engagement data
+      const data = await fetchWrapped(selectedClub.name, name, 'High Press')
+      if (data.error) throw new Error(data.error)
+      setResult(data)
+      setScreen('presentation')  // go straight to cinematic story mode
+    } catch (e) {
+      setError(e.message || 'Something went wrong. Try again.')
+      setScreen('input')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReset = () => {
+    setSelectedClub(null)
+    setResult(null)
+    setError(null)
+    resetTheme()
+    setScreen('club')
+  }
+
+  return (
+    <div className="app">
+      <div className="header">
+        <div className="logo">BUNDES<span>LIGA</span></div>
+        <div className="step-indicator">{steps[screen] || ''}</div>
+      </div>
+
+      {error && screen === 'input' && (
+        <div style={{padding:'0 24px'}}>
+          <div className="error-box">{error}</div>
+        </div>
+      )}
+
+      {screen === 'club' && <ClubSelectScreen onSelect={handleClubSelect} />}
+
+      {screen === 'input' && (
+        <UserInputScreen
+          club={selectedClub}
+          onSubmit={handleSubmit}
+          onBack={() => { resetTheme(); setScreen('club') }}
+        />
+      )}
+
+      {screen === 'loading' && <LoadingScreen />}
+
+      {screen === 'reveal' && result && (
+        <RevealScreen
+          data={result}
+          club={selectedClub}
+          onDone={() => setScreen('result')}
+        />
+      )}
+
+      {screen === 'result' && result && (
+        <WrappedScreen
+          data={result}
+          club={selectedClub}
+          onManagerMode={() => setScreen('manager')}
+          onCinematic={() => setScreen('presentation')}
+          onReset={handleReset}
+        />
+      )}
+
+      {screen === 'manager' && (
+        <ManagerScreen
+          club={selectedClub}
+          wrappedData={result}
+          onBack={() => setScreen('result')}
+        />
+      )}
+
+      {screen === 'presentation' && result && (
+        <WrappedPresentation
+          data={result}
+          club={selectedClub}
+          onClose={() => setScreen('result')}
+        />
+      )}
+    </div>
+  )
+}

@@ -203,47 +203,181 @@ def generate_wrapped_card(user_profile: dict,
                            scout_report: dict,
                            tactical_style: str) -> dict:
     """
-    Stage 3: Personalized Wrapped card for the judge/user.
-    This is the live call during demo — most visible Bedrock output.
+    Stage 3: Personal Wrapped card for the fan.
+    Stats are from ONE real fan's individual records — not averages.
+    Presented in first-person "you" exactly like Spotify Wrapped.
+
+    DATA REFERENCE:
+    - engagement_score = percentile rank within club (0–99)
+    - total_videos/stories/articles = real totals across active months
+    - favorite_video = most frequent title in their own records
+    - active_months = 1–12 (number of monthly records for this user)
     """
-    prompt = f"""You are writing a personalized Bundesliga season recap 
-for a football fan. Make it feel personal, exciting, and shareable —
-like Spotify Wrapped but for football.
+    user_name      = user_profile.get('user_name') or 'Manager'
+    archetype      = user_profile.get('archetype') or 'Casual Observer'
+    club           = user_profile.get('favorite_club') or 'Unknown'
+    top_platform   = user_profile.get('platform') or 'the app'
+    country        = user_profile.get('country') or ''
+    active_months  = user_profile.get('active_months') or 0
+    total_interact = user_profile.get('total_interactions') or 0
+    total_videos   = user_profile.get('total_videos') or 0
+    total_stories  = user_profile.get('total_stories') or 0
+    total_mc       = user_profile.get('total_match_center') or 0
+    fav_video      = user_profile.get('favorite_video') or None
+    fan_percentile = user_profile.get('fan_percentile') or 0
+    fan_count      = user_profile.get('fan_count') or 0
 
-Fan profile:
-- Favorite club: {user_profile.get('favorite_club', 'Unknown')}
-- Fan archetype: {user_profile.get('archetype', 'Casual Observer')}
-- Active months this season: {user_profile.get('active_months', 0)}
-- Total content consumed: {user_profile.get('total_interactions', 0)} interactions
-- Top video watched: {user_profile.get('favorite_video', 'match highlights')}
-- Preferred style: {tactical_style}
-- Engagement score: {user_profile.get('engagement_score', 0)}/100
+    # New KPI fields for Fan Identity (Story 9) and Fan DNA
+    match_center_persona  = user_profile.get('match_center_persona') or 'Live Wire'
+    peak_month            = user_profile.get('peak_month') or ''
+    peak_month_range      = user_profile.get('peak_month_matchday_range') or ''
+    content_diet_type     = user_profile.get('content_diet_type') or 'Highlight Addict'
+    arc_shape             = user_profile.get('arc_shape') or 'Rollercoaster'
+    loyalty_class         = user_profile.get('loyalty_class') or ''
+    global_rank           = user_profile.get('global_rank') or 0
+    global_rank_position  = user_profile.get('global_rank_position') or 0
+    country_rank          = user_profile.get('country_rank') or 0
+    age_rank              = user_profile.get('age_rank') or 0
+    age_group             = user_profile.get('age_group') or ''
+    country_in_profile    = user_profile.get('country') or country
+    is_international      = user_profile.get('is_international') or False
+    locale_class          = user_profile.get('locale_class') or ''
+    supermatch_month      = user_profile.get('supermatch_month') or ''
+    supermatch_context    = user_profile.get('supermatch_context') or ''
+    ticker_total          = user_profile.get('ticker_total') or 0
+    stats_total_kpi       = user_profile.get('stats_total') or 0
+    lineups_total         = user_profile.get('lineups_total') or 0
+    completionist         = user_profile.get('completionist') or False
+    planning_style        = user_profile.get('planning_style') or ''
+    table_persona         = user_profile.get('table_persona') or ''
+    max_streak            = user_profile.get('max_streak') or 0
+    streak_period         = user_profile.get('streak_period') or ''
+    loyalty_label         = loyalty_class or arc_shape
 
-This season's Bayern MVP by data: {scout_report.get('headline', '')}
+    fav_video_line = (
+        f"- Most-watched video title: '{fav_video}'"
+        if fav_video else
+        "- No favourite video recorded this season"
+    )
 
-Write their personalized Wrapped card.
+    # Format peak month label for Bedrock (convert YYYY-MM-DD to human-readable)
+    peak_month_label = peak_month[:7] if peak_month else 'N/A'  # YYYY-MM
+
+    # Fan Identity Signals section for Bedrock prompt
+    fan_identity_section = f"""
+Fan Identity Signals (use ALL FOUR in fan_identity_statement):
+- Match Center Persona: {match_center_persona} (Ticker: {ticker_total}, Stats: {stats_total_kpi}, Lineups: {lineups_total})
+- Peak Month: {peak_month_label} ({peak_month_range})
+- Content Diet: {content_diet_type}{' — Completionist badge: consumed all content types' if completionist else ''}
+- Season Arc: {arc_shape} · Loyalty: {loyalty_label}
+
+Fan DNA context (use in fan_dna_statement):
+- Global rank: #{global_rank_position} out of ~2,765 Bundesliga app fans ({global_rank}/99 percentile)
+- Country rank: {country_rank}/99 among {club} fans in {country_in_profile or 'their country'}
+- Age rank: {age_rank}/99 among {club} fans aged {age_group or 'unknown age group'}
+- Fan type: {locale_class}{' (international supporter)' if is_international else ''}
+- Planning style: {planning_style} · Standings obsession: {table_persona}
+- Supermatch month: {peak_month_label} — {supermatch_context}
+- Streak: {max_streak} consecutive active months{(' (' + streak_period + ')') if streak_period else ''}
+
+Additional output instructions:
+- Add "fan_identity_statement": exactly ONE sentence in second person ("You are..." or "Your season...") that references all four Fan Identity Signals (match_center_persona, peak month, content_diet_type, arc_shape). Maximum one sentence.
+- Add "fan_dna_statement": exactly ONE shareable sentence using the Fan DNA context (global rank position, loyalty class, supermatch month). Maximum one sentence.
+"""
+
+    prompt = f"""You are writing a Bundesliga Wrapped card — exactly like Spotify Wrapped but for football.
+The fan's name is {user_name}. Write every line as if these stats are THEIRS personally.
+Use "you" and "your" throughout. These are REAL numbers from one real fan's Bundesliga app history.
+
+THE FAN:
+- Name: {user_name}
+- Club: {club}
+- Fan archetype: {archetype}
+- Country: {country or 'unknown'}
+- Platform: {top_platform}
+- Active months this season: {active_months}
+
+THEIR 2024/25 SEASON IN THE BUNDESLIGA APP (real individual data):
+- {total_videos:,} videos watched
+- {total_stories:,} stories read
+- {total_mc:,} Match Center visits
+- {total_interact:,} total interactions
+{fav_video_line}
+- Fan Score: {fan_percentile}/100 (percentile rank among {fan_count:,} {club} fans)
+
+SEASON MVP (data-declared by Z-score Impact Score): {scout_report.get('headline', 'Top performer')}
+
+RULES — make it feel PERSONAL and HONEST:
+1. Greeting MUST say "{user_name}" by name and reference their archetype
+2. season_story tells {user_name}'s story using THEIR specific numbers — not generic statements
+3. fan_stat picks the most interesting of their numbers and contextualises it against the community
+   — e.g. "Your {fan_percentile}/100 Fan Score puts you in the top {100-fan_percentile}% of {club} fans"
+4. tactical_identity is about how {user_name} engages with {club} — derived from their behaviour pattern
+5. season_verdict max 12 words — honest about who they are, not inflated
+6. share_text is something {user_name} would actually post — include real numbers and #BundesligaWrapped
+{fan_identity_section}
 Respond ONLY with valid JSON. No preamble. No markdown.
 {{
-  "greeting": "personal opening line using their archetype",
-  "season_story": "2-3 sentences recapping their season as a fan",
-  "fan_stat": "one surprising personalised stat about their app behaviour",
-  "tactical_identity": "their tactical style translated to a football philosophy",
-  "season_verdict": "one punchy final line — their season in 10 words or less",
-  "share_text": "what they would post on social media about their wrapped"
+  "greeting": "personal opener using {user_name} and their archetype",
+  "season_story": "2-3 sentences to {user_name} using their real stats",
+  "fan_stat": "percentile insight or most impressive specific number with context",
+  "tactical_identity": "what {user_name}'s behaviour pattern says about how they follow football",
+  "season_verdict": "max 12 words — honest season summary for this specific fan",
+  "share_text": "tweet-ready with real numbers and #BundesligaWrapped",
+  "fan_identity_statement": "one sentence in second person referencing match_center_persona, peak month, content_diet_type, arc_shape",
+  "fan_dna_statement": "one shareable sentence using global rank, loyalty class, and supermatch month"
 }}"""
 
-    raw = _invoke(prompt, max_tokens=600)
+    raw = _invoke(prompt, max_tokens=700)
 
     fallback = {
-        "greeting": f"Welcome, {user_profile.get('archetype', 'fan')}",
-        "season_story": "You followed every moment this season.",
-        "fan_stat": f"{user_profile.get('total_interactions', 0)} interactions this season.",
-        "tactical_identity": tactical_style,
-        "season_verdict": "One season. Unforgettable.",
-        "share_text": "My Bundesliga Wrapped is here."
+        "greeting":
+            f"{user_name}, the {archetype} — your 2024/25 Bundesliga Wrapped is here.",
+        "season_story": (
+            f"This season, {user_name}, you watched {total_videos:,} videos, "
+            f"read {total_stories:,} stories and visited Match Center {total_mc:,} times "
+            f"across {active_months} active months. That's {total_interact:,} moments "
+            f"living and breathing {club}."
+        ),
+        "fan_stat": (
+            f"Your Fan Score of {fan_percentile}/100 places you in the top "
+            f"{max(1, 100 - fan_percentile)}% of {club} fans on the app."
+            if fan_percentile > 0 else
+            f"You racked up {total_interact:,} interactions — every single one counted."
+        ),
+        "tactical_identity": (
+            f"You're a {archetype} — your match data doesn't lie. "
+            f"Whether it's stats, lineups or highlights, {club} is always on your screen."
+        ),
+        "season_verdict":
+            f"{user_name}. {club}. {active_months} months. {fan_percentile}/100.",
+        "share_text": (
+            f"My #BundesligaWrapped: {total_videos:,} videos, "
+            f"{total_mc:,} Match Center visits, Fan Score {fan_percentile}/100. "
+            f"Proud {archetype}. #Bundesliga"
+        ),
+        "fan_identity_statement": (
+            f"You are a {match_center_persona} whose season peaked in {peak_month_label}, "
+            f"a true {content_diet_type} who ran a {arc_shape} season arc."
+        ),
+        "fan_dna_statement": (
+            f"Ranked #{global_rank_position} of ~2,765 global fans, your {loyalty_label} "
+            f"devotion peaked during {supermatch_context or peak_month_label}."
+        ),
     }
-    return _parse_json_response(raw, fallback)
+    wrapped = _parse_json_response(raw, fallback)
+    # Inject fan identity fallbacks if absent from Bedrock response
+    if 'fan_identity_statement' not in wrapped:
+        wrapped['fan_identity_statement'] = fallback['fan_identity_statement']
+    if 'fan_dna_statement' not in wrapped:
+        wrapped['fan_dna_statement'] = fallback['fan_dna_statement']
+    return wrapped
 
+    fav_video_line = (
+        f"- Most-watched video: '{fav_video}'"
+        if fav_video else
+        "- Most-watched content: match highlights"
+    )
 
 # ── FULL PIPELINE ────────────────────────────────────────────────────
 
@@ -264,10 +398,11 @@ def run_full_pipeline(top_players: list[dict],
     wrapped = generate_wrapped_card(user_profile, scout, tactical_style)
 
     return {
-        "mvp_analysis":  analysis,
-        "scout_report":  scout,
-        "wrapped_card":  wrapped,
+        "mvp_analysis": analysis,
+        "scout_report": scout,
+        "wrapped_card": wrapped,
     }
+
 
 def analyze_substitution(
     match_context: dict,

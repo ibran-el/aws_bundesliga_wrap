@@ -9,13 +9,13 @@ __pycache__/
 .aws/
 credentials
 
-# Hackathon data — rules forbid uploading
+# Hackathon data — contest rules forbid uploading raw data
 data/
 *.xml
 *.json
 *.mp4
 
-# IDE
+# IDE / Kiro workspace
 .kiro/
 *.code-workspace
 
@@ -23,5 +23,21 @@ data/
 .DS_Store
 Thumbs.db
 
+# Lambda build artifacts
 deploy/package/
 deploy/lambda.zip
+deploy/make_zip.py
+
+# Frontend build output and dependencies
+frontend/dist/
+frontend/node_modules/
+
+# Test data (local only)
+tests/data/
+
+# Python cache
+backend/__pycache__/
+tests/__pycache__/
+
+# Vite cache
+frontend/.vite/
