@@ -46,11 +46,11 @@ const TOTAL_SLIDES = 7
 // Per-slide auto-advance durations (ms). Infinity = gated by user interaction.
 // Slide 3 (video) duration is set dynamically at runtime from the video element.
 const SLIDE_DURATIONS = [
-  15000,      // 0: Intro
-  15000,      // 1: Solari scramble
+  7000,       // 0: Intro
+  8000,       // 1: Solari scramble (3s animation + 5s to read)
   Infinity,   // 2: Scratch card — gated
   15000,      // 3: Video — overridden at runtime with actual clip duration
-  15000,      // 4: Pitch zones
+  7000,       // 4: Pitch zones
   Infinity,   // 5: Quiz — gated
   Infinity,   // 6: Export — never auto-advances
 ]
