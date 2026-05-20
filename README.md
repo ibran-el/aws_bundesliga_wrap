@@ -227,6 +227,9 @@ MatchId: Schedule XML ↔ Match XML
 ## Team & Submission
 
 **Hackathon:** AWS World Sports Innovation Cup 2026 — Challenge 1: Bundesliga Wrapped  
+
 **Team:** ibran-el  (Nicholaus [Emrys] Ladislaus)
-**GitHub:** https://github.com/ibran-el/aws_bundesliga_wrap  
+
+**GitHub:** https://github.com/ibran-el/aws_bundesliga_wrap 
+ 
 **Live app:** https://main.dfyp9mw2b5bs6.amplifyapp.com/
