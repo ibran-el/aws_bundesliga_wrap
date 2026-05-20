@@ -273,3 +273,160 @@ Club Select → Name Input → Loading (API) → Cinematic Presentation (7 slide
 | PRFAQ document | MEDIUM |
 | 5-slide executive deck | MEDIUM |
 | Demo video recording | HIGH — Day 6 artifact |
+
+---
+
+## Session 13 — Manager Mode Fix + WrapPlus Enhancement
+**Hours:** ~3 hrs | **Status:** ✅ Complete + Deployed
+
+### Root Cause Fixed
+`ManagerScreen` in App.jsx was reading `wrappedData?.schedule` to populate the match list. The `/wrapped` API response has never contained a `schedule` field — matches were always `[]`. Full spec written (requirements → design → tasks) before implementation.
+
+---
+
+### What Was Built
+
+#### Backend — `backend/lambda_handler.py`
+New route: `POST /matches`
+
+```python
+def handle_matches(body: dict) -> dict:
+    team_id = (body.get('team_id') or '').strip()
+    if not team_id:
+        return _error(400, "team_id is required")
+    schedule = STATIC_DATA.get('schedule', {})
+    clubs    = STATIC_DATA.get('clubs', {})
+    matches = []
+    for match_id, m in schedule.items():
+        if m.get('home_team_id') == team_id or m.get('guest_team_id') == team_id:
+            matches.append({
+                'match_id':      match_id,
+                'match_day':     int(m.get('match_day', 0)),
+                'home_team':     clubs.get(m.get('home_team_id',''), {}).get('short_name', ''),
+                'home_team_id':  m.get('home_team_id', ''),
+                'guest_team':    clubs.get(m.get('guest_team_id',''), {}).get('short_name', ''),
+                'guest_team_id': m.get('guest_team_id', ''),
+                'result':        m.get('result', ''),
+                'kickoff':       m.get('kickoff', ''),
+            })
+    if not matches:
+        return _error(404, f"No matches found for team_id: {team_id}")
+    matches.sort(key=lambda x: (x['match_day'], x['kickoff']))
+    return _response(200, {'matches': matches})
+```
+
+- Registered as `'/matches': handle_matches` in the routes dict
+- CORS via `_response()` helper — no manual headers
+- Error pattern: 400/404 in handler, 500 caught by dispatcher-level try/except
+- AST validated: `python -c "import ast; ast.parse(open('backend/lambda_handler.py').read()); print('OK')"`
+
+**Verified live:**
+- Bayern (DFL-CLU-00000G) → 34 matches ✅
+- Dortmund (DFL-CLU-000007) → 34 matches ✅
+- Missing team_id → HTTP 400 ✅
+
+#### Frontend — `frontend/src/api.js`
+```js
+export async function fetchMatches(team_id) {
+  return makeRequest('/matches', { team_id });
+}
+```
+
+#### Frontend — `frontend/src/App.jsx`
+
+**ManagerScreen rewrite (match loading):**
+```js
+useEffect(() => {
+  if (!club?.club_id) { setLoadingMatches(false); return }
+  setLoadingMatches(true)
+  setError(null)
+  fetchMatches(club.club_id)
+    .then(data => { setMatches(data.matches || []); setLoadingMatches(false) })
+    .catch(() => { setError('Could not load matches. Please try again.'); setLoadingMatches(false) })
+}, [club?.club_id])
+```
+Dead `wrappedData?.schedule` useEffect removed.
+
+**Manager Mode UI enhancements (all 3 steps):**
+
+*Step 1 — Match Picker:*
+- Result filter pills: ALL / WINS / DRAWS / LOSSES (club-color active state)
+- W/D/L outcome badge on every match row — computed from perspective of selected club (home vs away)
+- Outcome-colored score + Home/Away tag on each row
+- `.spinner` while loading (club-color tinted)
+
+*Step 2 — Bench Selector:*
+- Players grouped by position: Goalkeeper / Defenders / Midfielders / Attackers
+- Three new helper functions:
+  ```js
+  getResultOutcome(result, isHome)  // "3:1" + isHome → 'W'/'D'/'L'
+  positionGroup(pos)                // DFL code → 'GK'|'DEF'|'MID'|'ATT'
+  groupPlayers(players)             // groups + orders + labels
+  ```
+- `★ DATA` gold badge on players with Bayern season stats (`has_season_stats: true`)
+
+*Step 3 — Analysis Result:*
+- Synergy gauge replaced with bidirectional bar:
+  - Score number with matching color glow shadow (green/red/muted)
+  - Horizontal bar fills right (positive) or left (negative) from center
+  - Axis labels −10 / +10 with center divider
+  - `manager_rating` label below bar
+- Bayern stat comparison grid (only when `has_deep_stats: true`):
+  - 3-row grid: IMPACT / xG / GOAL PART.
+  - OUT player (muted) vs IN player (gold)
+- Substitution context arrow colored by outcome: `{starter.name} → {bench.name}`
+
+**WrapPlus branding (all 3 steps + Wrapped Summary):**
+- Every Manager Mode step has a 9px footer disclaimer:
+  `⚡ MANAGER MODE · WRAPPLUS PREVIEW — Real DFL data · AI-powered tactical analysis · Coming to all clubs in WrapPlus`
+- "TRY MANAGER MODE →" button in WrappedScreen has subtext:
+  `WrapPlus Preview · Deep stats for Bayern · Lineup analysis for all 18 clubs`
+
+---
+
+### Deployment
+- `backend/lambda_handler.py` → `deploy/package/lambda_handler.py` (copy)
+- `deploy/make_zip.py` → `deploy/lambda.zip` (68MB)
+- `aws s3 cp deploy/lambda.zip s3://hackathon-data-514421696937/lambda.zip --profile emrys-dev`
+- `aws lambda update-function-code --function-name bundesliga-wrapped ...`
+- `npm run build` → exit 0, 461KB bundle ✅
+
+---
+
+### Spec Created
+`.kiro/specs/manager-mode-fix/` — full requirements → design → tasks spec (9 requirements, 4 tasks, all completed).
+
+---
+
+## Final Development Status (End of Session 13)
+
+### All screens working
+| Screen | Status |
+|---|---|
+| Club selector | ✅ |
+| Name input | ✅ |
+| Loading | ✅ |
+| Cinematic presentation (7 slides) | ✅ |
+| Wrap summary (full KPI cards) | ✅ |
+| Manager Mode — Match Picker | ✅ Fixed + enhanced |
+| Manager Mode — Bench Selector | ✅ Position-grouped + DATA badges |
+| Manager Mode — Analysis | ✅ Bidirectional gauge + stat delta |
+
+### Backend — Live (eu-central-1)
+| Route | Status |
+|---|---|
+| POST /clubs | ✅ |
+| POST /wrapped | ✅ |
+| POST /mvp | ✅ |
+| POST /substitution | ✅ |
+| POST /analyze-sub | ✅ |
+| POST /matches | ✅ New |
+
+### Remaining (non-code deliverables)
+| Item | Status |
+|---|---|
+| GitHub push + Amplify live URL | ⏳ Next |
+| README.md | ⏳ Next |
+| PRFAQ document | ⏳ Next |
+| 5-slide executive summary | ⏳ Next |
+| Demo video | ⏳ Next |

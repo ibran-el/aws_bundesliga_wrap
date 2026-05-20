@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import './index.css'
-import { fetchClubs, fetchWrapped, fetchMVP, fetchSubstitution, fetchAnalyzeSub } from './api'
+import { fetchClubs, fetchWrapped, fetchMVP, fetchSubstitution, fetchAnalyzeSub, fetchMatches } from './api'
 import WrappedPresentation from './components/WrappedPresentation'
 
 const STYLES = ['High Press', 'Possession', 'Counter-Attack']
@@ -1047,9 +1047,12 @@ function WrappedScreen({ data, club, onManagerMode, onReset, onCinematic }) {
           ⚡ Auto-generated from real DFL data · Works for all 18 Bundesliga clubs · Powered by Amazon Bedrock
         </div>
 
-        <button className="btn btn-primary" onClick={onManagerMode} style={{marginBottom:8}}>
+        <button className="btn btn-primary" onClick={onManagerMode} style={{marginBottom:4}}>
           TRY MANAGER MODE →
         </button>
+        <div style={{fontSize:9,color:'rgba(255,255,255,0.2)',textAlign:'center',marginBottom:8,letterSpacing:'0.5px',lineHeight:1.6}}>
+          WrapPlus Preview · Deep stats for Bayern · Lineup analysis for all 18 clubs
+        </div>
         <button className="btn btn-ghost" style={{marginBottom:8, borderColor: clr, color: clr}}
                 onClick={onCinematic}>
           🎬 CINEMATIC STORY MODE
@@ -1060,6 +1063,37 @@ function WrappedScreen({ data, club, onManagerMode, onReset, onCinematic }) {
       </div>
     </div>
   )
+}
+
+// ── MANAGER MODE HELPERS ──
+
+/** Parse result string e.g. "3:1" → outcome 'W'/'D'/'L' from perspective of isHome */
+function getResultOutcome(result, isHome) {
+  if (!result) return null
+  const m = result.match(/(\d+)\s*[:\-]\s*(\d+)/)
+  if (!m) return null
+  const h = parseInt(m[1]), g = parseInt(m[2])
+  if (h === g) return 'D'
+  return isHome ? (h > g ? 'W' : 'L') : (g > h ? 'W' : 'L')
+}
+
+/** Map DFL position code/string to one of GK | DEF | MID | ATT */
+function positionGroup(pos) {
+  if (!pos) return 'MID'
+  const p = pos.toLowerCase().replace(/[\s_\-]/g, '')
+  if (['tw','gk','goalkeeper','torwart','keeper'].some(x => p === x || p.includes(x))) return 'GK'
+  if (['la','ra','ms','sa','st','cf','lw','rw','fw','strk','forw','winger'].some(x => p === x || p.includes(x))) return 'ATT'
+  if (['iv','lv','rv','lav','rav','lib','reb','cb','lb','rb','lwb','rwb','back','def','vert'].some(x => p === x || p.includes(x))) return 'DEF'
+  return 'MID'
+}
+
+/** Group array of players into ordered position sections */
+function groupPlayers(players) {
+  const ORDER  = ['GK','DEF','MID','ATT']
+  const LABELS = { GK:'Goalkeeper', DEF:'Defenders', MID:'Midfielders', ATT:'Attackers' }
+  const buckets = { GK:[], DEF:[], MID:[], ATT:[] }
+  players.forEach(p => { const g = positionGroup(p.playing_position); buckets[g].push(p) })
+  return ORDER.filter(g => buckets[g].length > 0).map(g => ({ key:g, label:LABELS[g], players:buckets[g] }))
 }
 
 // ── SCREEN 4: MANAGER MODE ──
@@ -1074,19 +1108,28 @@ function ManagerScreen({ club, wrappedData, onBack }) {
   const [analysis, setAnalysis] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [resultFilter, setResultFilter] = useState('all')
 
   const clr = safeColor(club.primary_color) || 'var(--accent)'
 
-  // Load matches from wrapped data schedule or separate endpoint
+  // Load matches via fetchMatches API
   useEffect(() => {
-    const schedule = wrappedData?.schedule || []
-    if (schedule.length > 0) {
-      setMatches(schedule)
+    if (!club?.club_id) {
       setLoadingMatches(false)
-    } else {
-      setLoadingMatches(false)
+      return
     }
-  }, [wrappedData])
+    setLoadingMatches(true)
+    setError(null)
+    fetchMatches(club.club_id)
+      .then(data => {
+        setMatches(data.matches || [])
+        setLoadingMatches(false)
+      })
+      .catch(() => {
+        setError('Could not load matches. Please try again.')
+        setLoadingMatches(false)
+      })
+  }, [club?.club_id])
 
   const handleSelectMatch = async match => {
     setSelectedMatch(match)
@@ -1131,29 +1174,101 @@ function ManagerScreen({ club, wrappedData, onBack }) {
     setStep('match')
   }
 
-  const synergyClass = score => {
-    if (score > 0) return 'positive'
-    if (score < 0) return 'negative'
-    return 'neutral'
-  }
-
   if (step === 'analysis' && analysis) {
     const a = analysis.analysis || analysis
     const score = a.synergy_score ?? 0
+    const gaugeColor = score > 0 ? '#00c853' : score < 0 ? '#ff1744' : 'var(--text-muted)'
+    const fillPct = Math.abs(score) / 10 * 50
+
     return (
       <div className="screen">
-        <button className="back-btn" onClick={handleTryAnother} style={{marginBottom:24}}>← Try Another</button>
-        <div style={{fontFamily:'var(--font-display)',fontSize:13,letterSpacing:'3px',color:'var(--text-muted)',marginBottom:16}}>
+        <button className="back-btn" onClick={handleTryAnother} style={{marginBottom:16}}>← Try Another</button>
+        <div style={{fontFamily:'var(--font-display)',fontSize:13,letterSpacing:'3px',color:'var(--text-muted)',marginBottom:20}}>
           TACTICAL ANALYSIS
         </div>
 
-        <div className="synergy-gauge">
-          <div className={`synergy-score ${synergyClass(score)}`}>{score > 0 ? `+${score}` : score}</div>
-          <div>
-            <div style={{fontFamily:'var(--font-display)',fontSize:18,letterSpacing:'1px',marginBottom:4}}>SYNERGY SCORE</div>
-            <div className="synergy-label">{a.manager_rating || 'Decent Move'}</div>
+        {/* Synergy gauge — bidirectional bar */}
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'20px',marginBottom:12}}>
+          <div style={{
+            fontFamily:'var(--font-display)',
+            fontSize:64,
+            letterSpacing:'2px',
+            color:gaugeColor,
+            lineHeight:1,
+            textAlign:'center',
+            marginBottom:10,
+            textShadow:`0 0 28px ${gaugeColor}50`,
+          }}>
+            {score > 0 ? `+${score}` : score}
+          </div>
+          {/* Bar */}
+          <div style={{position:'relative',height:8,background:'var(--border)',borderRadius:4,overflow:'hidden',marginBottom:6}}>
+            <div style={{position:'absolute',left:'50%',top:0,width:2,height:'100%',background:'rgba(255,255,255,0.12)',transform:'translateX(-50%)'}}/>
+            {score !== 0 && (
+              <div style={{
+                position:'absolute',
+                height:'100%',
+                background:gaugeColor,
+                borderRadius:4,
+                boxShadow:`0 0 10px ${gaugeColor}80`,
+                transition:'width 0.8s cubic-bezier(0.4,0,0.2,1)',
+                ...(score > 0 ? {left:'50%',width:`${fillPct}%`} : {right:'50%',width:`${fillPct}%`}),
+              }}/>
+            )}
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'rgba(255,255,255,0.25)',letterSpacing:'0.5px',marginBottom:8}}>
+            <span>−10</span>
+            <span style={{letterSpacing:'2px',textTransform:'uppercase',color:'var(--text-muted)'}}>Synergy Score</span>
+            <span>+10</span>
+          </div>
+          <div style={{textAlign:'center',fontFamily:'var(--font-display)',fontSize:13,letterSpacing:'2px',color:gaugeColor}}>
+            {a.manager_rating || 'DECENT MOVE'}
           </div>
         </div>
+
+        {/* Non-Bayern disclaimer */}
+        {!analysis?.has_deep_stats && (
+          <div style={{
+            background:'var(--surface)',
+            border:'1px solid var(--border)',
+            borderRadius:10,
+            padding:'12px 16px',
+            fontSize:13,
+            color:'var(--text-muted)',
+            marginBottom:12,
+            lineHeight:1.6,
+          }}>
+            ℹ️ Deep stats available for Bayern players only. Analysis is based on lineup data.
+          </div>
+        )}
+
+        {/* Bayern stat delta — only when has_deep_stats */}
+        {analysis?.has_deep_stats && analysis.starter_stats && analysis.bench_stats && Object.keys(analysis.starter_stats).length > 0 && (
+          <div className="wrapped-card-physical" style={{marginBottom:12}}>
+            <span className="card-label" style={{color:'var(--gold)'}}>Stat Comparison</span>
+            <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',gap:'8px 8px',marginTop:10,alignItems:'center'}}>
+              <div style={{fontSize:9,color:'var(--text-muted)',letterSpacing:'1px',textTransform:'uppercase'}}>
+                OUT: {(analysis.starter?.name || '').split(' ').pop()}
+              </div>
+              <div/>
+              <div style={{fontSize:9,color:'var(--text-muted)',letterSpacing:'1px',textTransform:'uppercase',textAlign:'right'}}>
+                IN: {(analysis.bench_player?.name || '').split(' ').pop()}
+              </div>
+
+              <div style={{fontFamily:'var(--font-display)',fontSize:22,color:'var(--text-muted)'}}>{analysis.starter_stats.impact_score != null ? Number(analysis.starter_stats.impact_score).toFixed(0) : '—'}</div>
+              <div style={{fontSize:8,color:'var(--text-muted)',letterSpacing:'1px',textAlign:'center'}}>IMPACT</div>
+              <div style={{fontFamily:'var(--font-display)',fontSize:22,color:'var(--gold)',textAlign:'right'}}>{analysis.bench_stats.impact_score != null ? Number(analysis.bench_stats.impact_score).toFixed(0) : '—'}</div>
+
+              <div style={{fontFamily:'var(--font-display)',fontSize:22,color:'var(--text-muted)'}}>{analysis.starter_stats.xg != null ? Number(analysis.starter_stats.xg).toFixed(2) : '—'}</div>
+              <div style={{fontSize:8,color:'var(--text-muted)',letterSpacing:'1px',textAlign:'center'}}>xG</div>
+              <div style={{fontFamily:'var(--font-display)',fontSize:22,color:'var(--gold)',textAlign:'right'}}>{analysis.bench_stats.xg != null ? Number(analysis.bench_stats.xg).toFixed(2) : '—'}</div>
+
+              <div style={{fontFamily:'var(--font-display)',fontSize:22,color:'var(--text-muted)'}}>{analysis.starter_stats.participations_goal ?? '—'}</div>
+              <div style={{fontSize:8,color:'var(--text-muted)',letterSpacing:'1px',textAlign:'center'}}>GOAL PART.</div>
+              <div style={{fontFamily:'var(--font-display)',fontSize:22,color:'var(--gold)',textAlign:'right'}}>{analysis.bench_stats.participations_goal ?? '—'}</div>
+            </div>
+          </div>
+        )}
 
         <div className="narrative-card">
           <span className="narrative-label" style={{color:clr}}>Verdict</span>
@@ -1170,12 +1285,18 @@ function ManagerScreen({ club, wrappedData, onBack }) {
           </div>
         )}
 
-        <div style={{background:'rgba(255,255,255,0.02)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',fontSize:11,color:'var(--text-muted)',marginBottom:16}}>
-          {starter?.name} → {bench?.name}
+        <div style={{background:'rgba(255,255,255,0.02)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',fontSize:12,color:'var(--text-muted)',marginBottom:16}}>
+          {starter?.name} <span style={{color:gaugeColor}}>→</span> {bench?.name}
         </div>
 
-        <button className="btn btn-ghost" onClick={handleTryAnother}>TRY ANOTHER</button>
-        <button className="btn btn-ghost" onClick={onBack} style={{marginTop:8}}>BACK TO WRAPPED</button>
+        <button className="btn btn-ghost" onClick={handleTryAnother} style={{marginBottom:8}}>TRY ANOTHER</button>
+        <button className="btn btn-ghost" onClick={onBack}>BACK TO WRAPPED</button>
+
+        {/* WrapPlus disclaimer */}
+        <div style={{marginTop:24,paddingTop:16,borderTop:'1px solid var(--border)',fontSize:9,color:'rgba(255,255,255,0.18)',textAlign:'center',letterSpacing:'1px',lineHeight:1.8}}>
+          ⚡ MANAGER MODE · WRAPPLUS PREVIEW<br/>
+          Real DFL data · AI-powered tactical analysis · Coming to all clubs in WrapPlus
+        </div>
       </div>
     )
   }
@@ -1183,9 +1304,12 @@ function ManagerScreen({ club, wrappedData, onBack }) {
   if (step === 'bench' && matchData) {
     const starters = matchData.starting_xi || matchData.starters || []
     const benchPlayers = matchData.bench || []
+    const starterGroups = groupPlayers(starters)
+    const benchGroups = groupPlayers(benchPlayers)
+
     return (
       <div className="screen">
-        <button className="back-btn" onClick={() => setStep('match')} style={{marginBottom:24}}>← Back</button>
+        <button className="back-btn" onClick={() => setStep('match')} style={{marginBottom:16}}>← Back</button>
         <div style={{fontFamily:'var(--font-display)',fontSize:13,letterSpacing:'3px',color:'var(--text-muted)',marginBottom:4}}>
           MANAGER MODE
         </div>
@@ -1196,86 +1320,203 @@ function ManagerScreen({ club, wrappedData, onBack }) {
         {error && <div className="error-box">{error}</div>}
 
         <div className="section-title">Starting XI — tap to remove</div>
-        <div className="player-grid" style={{marginBottom:16}}>
-          {starters.map(p => (
-            <div
-              key={p.person_id}
-              className={`player-item ${starter?.person_id === p.person_id ? 'selected-starter' : ''}`}
-              onClick={() => setStarter(starter?.person_id === p.person_id ? null : p)}
-            >
-              <div className="player-number">{p.shirt_number || '—'}</div>
-              <div className="player-name">{p.name}</div>
-              <div className="player-pos">{p.playing_position || ''}</div>
+        {starterGroups.map(({ key, label, players: gp }) => (
+          <div key={key} style={{marginBottom:12}}>
+            <div style={{fontSize:9,letterSpacing:'2px',color:'rgba(255,255,255,0.25)',textTransform:'uppercase',marginBottom:6}}>
+              {label}
             </div>
-          ))}
-        </div>
+            <div className="player-grid">
+              {gp.map(p => (
+                <div
+                  key={p.person_id}
+                  className={`player-item ${starter?.person_id === p.person_id ? 'selected-starter' : ''}`}
+                  onClick={() => setStarter(starter?.person_id === p.person_id ? null : p)}
+                >
+                  <div className="player-number">{p.shirt_number || '—'}</div>
+                  <div className="player-name">{p.name}</div>
+                  <div className="player-pos">{p.playing_position || ''}</div>
+                  {p.has_season_stats && (
+                    <div style={{fontSize:8,color:'var(--gold)',letterSpacing:'0.5px',marginTop:3}}>★ DATA</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
 
-        <div className="section-title">Bench — tap to bring on</div>
-        <div className="player-grid" style={{marginBottom:20}}>
-          {benchPlayers.map(p => (
-            <div
-              key={p.person_id}
-              className={`player-item ${bench?.person_id === p.person_id ? 'selected-bench' : ''}`}
-              onClick={() => setBench(bench?.person_id === p.person_id ? null : p)}
-            >
-              <div className="player-number">{p.shirt_number || '—'}</div>
-              <div className="player-name">{p.name}</div>
-              <div className="player-pos">{p.playing_position || ''}</div>
+        <div className="section-title" style={{marginTop:20}}>Bench — tap to bring on</div>
+        {benchGroups.map(({ key, label, players: gp }) => (
+          <div key={key} style={{marginBottom:12}}>
+            <div style={{fontSize:9,letterSpacing:'2px',color:'rgba(255,255,255,0.25)',textTransform:'uppercase',marginBottom:6}}>
+              {label}
             </div>
-          ))}
-        </div>
+            <div className="player-grid">
+              {gp.map(p => (
+                <div
+                  key={p.person_id}
+                  className={`player-item ${bench?.person_id === p.person_id ? 'selected-bench' : ''}`}
+                  onClick={() => setBench(bench?.person_id === p.person_id ? null : p)}
+                >
+                  <div className="player-number">{p.shirt_number || '—'}</div>
+                  <div className="player-name">{p.name}</div>
+                  <div className="player-pos">{p.playing_position || ''}</div>
+                  {p.has_season_stats && (
+                    <div style={{fontSize:8,color:'var(--gold)',letterSpacing:'0.5px',marginTop:3}}>★ DATA</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
 
         <button
           className="btn btn-primary"
           disabled={!starter || !bench || loading}
           onClick={handleAnalyze}
+          style={{marginTop:8}}
         >
           {loading ? 'ANALYZING…' : 'ANALYZE SUBSTITUTION'}
         </button>
+
+        {/* WrapPlus disclaimer */}
+        <div style={{marginTop:24,paddingTop:16,borderTop:'1px solid var(--border)',fontSize:9,color:'rgba(255,255,255,0.18)',textAlign:'center',letterSpacing:'1px',lineHeight:1.8}}>
+          ⚡ MANAGER MODE · WRAPPLUS PREVIEW<br/>
+          Real DFL data · AI-powered tactical analysis · Coming to all clubs in WrapPlus
+        </div>
       </div>
     )
   }
 
   // step === 'match'
+  const filteredMatches = resultFilter === 'all'
+    ? matches
+    : matches.filter(m => {
+        const isHome = m.home_team_id === club.club_id
+        return getResultOutcome(m.result, isHome) === resultFilter
+      })
+
   return (
     <div className="screen">
-      <button className="back-btn" onClick={onBack} style={{marginBottom:24}}>← Back to Wrapped</button>
+      <button className="back-btn" onClick={onBack} style={{marginBottom:16}}>← Back to Wrapped</button>
       <div style={{fontFamily:'var(--font-display)',fontSize:13,letterSpacing:'3px',color:'var(--text-muted)',marginBottom:4}}>
         MANAGER MODE
       </div>
       <div className="hero-title" style={{fontSize:'clamp(36px,9vw,52px)',marginBottom:8}}>
         PICK A<br/><span style={{color:clr}}>MATCH</span>
       </div>
-      <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:20}}>
+      <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:16}}>
         Select a 2024/25 match to simulate a substitution
       </div>
 
       {error && <div className="error-box">{error}</div>}
-      {loading && <div style={{color:'var(--text-muted)',fontSize:13,marginBottom:12}}>Loading…</div>}
+      {loading && (
+        <div style={{display:'flex',justifyContent:'center',padding:'16px 0'}}>
+          <div className="spinner" style={{borderTopColor:clr}}/>
+        </div>
+      )}
 
-      {loadingMatches && <div style={{color:'var(--text-muted)',fontSize:13}}>Loading matches…</div>}
+      {loadingMatches && (
+        <div style={{display:'flex',justifyContent:'center',padding:'32px 0'}}>
+          <div className="spinner" style={{borderTopColor:clr}}/>
+        </div>
+      )}
 
-      {!loadingMatches && matches.length === 0 && (
+      {!loadingMatches && !club?.club_id && (
+        <div className="error-box">No club selected. Please go back and select a club.</div>
+      )}
+      {!loadingMatches && club?.club_id && matches.length === 0 && !error && (
         <div style={{color:'var(--text-muted)',fontSize:13,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px'}}>
-          No matches available. Please generate your Wrapped first to load the schedule.
+          No matches available for this season.
         </div>
       )}
 
       {matches.length > 0 && (
-        <div className="match-list">
-          {matches.map(m => (
-            <div
-              key={m.match_id}
-              className={`match-item ${selectedMatch?.match_id === m.match_id ? 'selected' : ''}`}
-              onClick={() => handleSelectMatch(m)}
-            >
-              <div className="match-day">MATCH DAY {m.match_day}</div>
-              <div className="match-teams">{m.home_team} vs {m.guest_team}</div>
-              <div className="match-result">{m.result || ''}</div>
-            </div>
-          ))}
-        </div>
+        <>
+          {/* Result filter pills */}
+          <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+            {[['all','ALL'],['W','WINS'],['D','DRAWS'],['L','LOSSES']].map(([val,label]) => {
+              const active = resultFilter === val
+              return (
+                <button
+                  key={val}
+                  onClick={() => setResultFilter(val)}
+                  style={{
+                    padding:'5px 12px',
+                    borderRadius:100,
+                    border:`1px solid ${active ? clr : 'var(--border)'}`,
+                    background: active ? `rgba(${hexToRgb(clr)},0.15)` : 'var(--surface)',
+                    color: active ? clr : 'var(--text-muted)',
+                    fontSize:10,
+                    letterSpacing:'1px',
+                    cursor:'pointer',
+                    fontFamily:'var(--font-display)',
+                    transition:'all var(--transition)',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+            {resultFilter !== 'all' && (
+              <span style={{fontSize:10,color:'var(--text-muted)',alignSelf:'center',marginLeft:4}}>
+                {filteredMatches.length} match{filteredMatches.length !== 1 ? 'es' : ''}
+              </span>
+            )}
+          </div>
+
+          <div className="match-list">
+            {filteredMatches.length === 0 ? (
+              <div style={{color:'var(--text-muted)',fontSize:13,padding:'14px 0',textAlign:'center'}}>
+                No {resultFilter === 'W' ? 'wins' : resultFilter === 'D' ? 'draws' : 'losses'} found.
+              </div>
+            ) : filteredMatches.map(m => {
+              const isHome = m.home_team_id === club.club_id
+              const outcome = getResultOutcome(m.result, isHome)
+              const outcomeColor = outcome === 'W' ? '#00c853' : outcome === 'L' ? '#ff1744' : 'var(--text-muted)'
+              const isSelected = selectedMatch?.match_id === m.match_id
+              return (
+                <div
+                  key={m.match_id}
+                  className={`match-item ${isSelected ? 'selected' : ''}`}
+                  style={isSelected ? {borderColor:clr, boxShadow:`0 0 12px rgba(${hexToRgb(clr)},0.3)`} : {}}
+                  onClick={() => handleSelectMatch(m)}
+                >
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
+                    <div className="match-day">MATCH DAY {m.match_day}</div>
+                    {outcome && (
+                      <div style={{
+                        fontFamily:'var(--font-display)',
+                        fontSize:11,
+                        letterSpacing:'1.5px',
+                        color:outcomeColor,
+                        background:`${outcomeColor}18`,
+                        border:`1px solid ${outcomeColor}40`,
+                        borderRadius:4,
+                        padding:'1px 7px',
+                      }}>
+                        {outcome}
+                      </div>
+                    )}
+                  </div>
+                  <div className="match-teams">{m.home_team} vs {m.guest_team}</div>
+                  {m.result && (
+                    <div className="match-result" style={{color:outcomeColor}}>
+                      {m.result}
+                      {isHome !== undefined && <span style={{color:'rgba(255,255,255,0.2)',fontSize:10}}> · {isHome ? 'Home' : 'Away'}</span>}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </>
       )}
+
+      {/* WrapPlus disclaimer */}
+      <div style={{marginTop:24,paddingTop:16,borderTop:'1px solid var(--border)',fontSize:9,color:'rgba(255,255,255,0.18)',textAlign:'center',letterSpacing:'1px',lineHeight:1.8}}>
+        ⚡ MANAGER MODE · WRAPPLUS PREVIEW<br/>
+        Real DFL data · AI-powered tactical analysis · Coming to all clubs in WrapPlus
+      </div>
     </div>
   )
 }

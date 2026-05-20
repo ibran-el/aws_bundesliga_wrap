@@ -384,6 +384,42 @@ def handle_analyze_sub(body: dict) -> dict:
     })
 
 
+def handle_matches(body: dict) -> dict:
+    """
+    POST /matches
+    Required: team_id (DFL club ID, e.g. "DFL-CLU-00000G")
+    Returns all 2024/25 fixtures for the given team, sorted by match_day ascending.
+    """
+    team_id = (body.get('team_id') or '').strip()
+    if not team_id:
+        return _error(400, "team_id is required")
+
+    schedule = STATIC_DATA.get('schedule', {})
+    clubs    = STATIC_DATA.get('clubs', {})
+
+    matches = []
+    for match_id, m in schedule.items():
+        if m.get('home_team_id') == team_id or m.get('guest_team_id') == team_id:
+            home_id  = m.get('home_team_id', '')
+            guest_id = m.get('guest_team_id', '')
+            matches.append({
+                'match_id':      match_id,
+                'match_day':     int(m.get('match_day', 0)),
+                'home_team':     clubs.get(home_id,  {}).get('short_name', ''),
+                'home_team_id':  home_id,
+                'guest_team':    clubs.get(guest_id, {}).get('short_name', ''),
+                'guest_team_id': guest_id,
+                'result':        m.get('result', ''),
+                'kickoff':       m.get('kickoff', ''),
+            })
+
+    if not matches:
+        return _error(404, f"No matches found for team_id: {team_id}")
+
+    matches.sort(key=lambda x: (x['match_day'], x['kickoff']))
+    return _response(200, {'matches': matches})
+
+
 # ── MAIN HANDLER ─────────────────────────────────────────────────────
 
 def lambda_handler(event, context):
@@ -412,6 +448,7 @@ def lambda_handler(event, context):
         '/mvp':          handle_mvp,
         '/substitution': handle_substitution,
         '/analyze-sub':  handle_analyze_sub,
+        '/matches':      handle_matches,
     }
 
     handler_fn = routes.get(path)

@@ -134,5 +134,14 @@ export async function fetchAnalyzeSub(match_id, team_id, starter_person_id, benc
   });
 }
 
+/**
+ * Fetch all 2024/25 fixtures for a given club
+ * @param {string} team_id - DFL club ID (e.g. "DFL-CLU-00000G")
+ * @returns {Promise<object>} - { matches: [{match_id, match_day, home_team, home_team_id, guest_team, guest_team_id, result, kickoff}] }
+ */
+export async function fetchMatches(team_id) {
+  return makeRequest('/matches', { team_id });
+}
+
 // Export constants for use in components
 export { API_BASE, REQUEST_TIMEOUT };
