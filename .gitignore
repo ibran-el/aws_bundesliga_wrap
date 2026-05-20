@@ -30,18 +30,22 @@ ARCHITECTURE.md
 PROJECT_LOG*.md
 github_link.txt
 
-# IDE / Kiro workspace
-.kiro/
+# IDE / editor settings — local only
+.vscode/
 *.code-workspace
+.postman.json
+.kiro/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Lambda build artifacts
+# Lambda build artifacts — local only
 deploy/package/
 deploy/lambda.zip
 deploy/make_zip.py
+deploy/build_lambda.sh
+deploy/test_out.json
 
 # Frontend build output and dependencies
 frontend/dist/
