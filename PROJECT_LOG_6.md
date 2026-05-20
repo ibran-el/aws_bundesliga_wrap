@@ -430,3 +430,78 @@ Dead `wrappedData?.schedule` useEffect removed.
 | PRFAQ document | ⏳ Next |
 | 5-slide executive summary | ⏳ Next |
 | Demo video | ⏳ Next |
+
+---
+
+## Session 14 — Submission Wrap-Up Planning
+**Hours:** ~0.5 hrs | **Status:** ✅ Complete
+
+### What Was Done
+
+**Development declared complete.** All app features working end-to-end, Lambda deployed, frontend build passing.
+
+**GitHub remote configured:**
+```
+git remote add origin https://github.com/ibran-el/aws_bundesliga_wrap.git
+git push -u origin main
+```
+Branch `main` is now live at `https://github.com/ibran-el/aws_bundesliga_wrap`.
+
+**Remaining deliverables confirmed (all being completed):**
+
+| Order | Deliverable | Method |
+|---|---|---|
+| 1 | GitHub push + Amplify live URL | Done — see above |
+| 2 | README.md | Independent session prompt written |
+| 3 | PRFAQ document | Independent session prompt written |
+| 4 | Executive summary (5 slides) | Independent session prompt written |
+| 5 | Demo video script | Independent session prompt written |
+
+**Four independent session prompts written** — self-contained, read source files fresh, no session memory dependency. Stored in the previous session log entry above for reference.
+
+**Amplify next steps (browser — ~3 min):**
+1. console.aws.amazon.com/amplify → eu-central-1 → New app → Host web app
+2. Connect GitHub → `ibran-el/aws_bundesliga_wrap` → branch `main`
+3. Build settings: base directory `frontend`, build command `npm run build`, output `dist`
+4. Deploy → copy `https://XXXXX.amplifyapp.com` URL
+5. Insert live URL into README and Video Script prompts before running them
+
+---
+
+## Final Project State
+
+### Git
+- Branch: `main`
+- Remote: `https://github.com/ibran-el/aws_bundesliga_wrap`
+- Last commit: `99362d0` — feat: Manager Mode fix + WrapPlus enhancements
+
+### AWS (all eu-central-1)
+| Service | Resource | Status |
+|---|---|---|
+| Lambda | bundesliga-wrapped | ✅ Live |
+| API Gateway | o5rl18o91h | ✅ Live — 6 routes |
+| S3 | hackathon-data-514421696937 | ✅ Live |
+| Amplify | aws_bundesliga_wrap | ⏳ Connect via console |
+
+### Code deliverables — 100% complete
+| Component | Status |
+|---|---|
+| backend/lambda_handler.py | ✅ 6 routes + cold-start cache |
+| backend/engagement_mapper.py | ✅ 17 KPI signals |
+| backend/bedrock_handler.py | ✅ 3-stage chain + substitution analysis |
+| backend/stats_processor.py | ✅ Z-score Impact Score |
+| backend/xml_parser.py | ✅ DFL XML parsing |
+| backend/config.py | ✅ All constants |
+| frontend/src/App.jsx | ✅ All screens, Manager Mode enhanced |
+| frontend/src/api.js | ✅ 6 endpoint wrappers |
+| frontend/src/index.css | ✅ Complete design system |
+| frontend/src/components/WrappedPresentation.jsx | ✅ 7-slide cinematic mode |
+
+### Non-code deliverables — in progress
+| Deliverable | Status |
+|---|---|
+| github_link.txt | ⏳ Write after Amplify URL confirmed |
+| README.md | ⏳ Session prompt ready |
+| PRFAQ.md → prfaq.pdf | ⏳ Session prompt ready |
+| EXECUTIVE_SUMMARY_CONTENT.md → executive_summary.pdf | ⏳ Session prompt ready |
+| VIDEO_SCRIPT.md → presentation_video.mp4 | ⏳ Session prompt ready |
